@@ -287,5 +287,5 @@ export function passesInternationalFilter(
   allowInternational: boolean
 ): boolean {
   if (allowInternational) return true;
-  return isIndiaLocation(job.city ?? "", job.country ?? job.location ?? "", job.remoteType);
+  return isIndiaLocation(job.city ?? "", job.country ?? "", job.remoteType, job.location);
 }

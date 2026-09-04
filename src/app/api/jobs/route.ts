@@ -9,6 +9,7 @@ import { citySortKey, countrySortKey } from "@/lib/location";
 import { jobMatchesExcluded, parseSearchQuery, rankSearchJob } from "@/lib/search";
 import { serializeJobAi } from "@/lib/ai/dto";
 import { JOB_CARD_SELECT } from "@/lib/jobs/list-select";
+import { passesInternationalFilter } from "@/lib/relevance/engine";
 
 export const dynamic = "force-dynamic";
 
@@ -57,18 +58,26 @@ export async function GET(request: Request) {
   if (tier) companyFilter.tier = tier;
   if (Object.keys(companyFilter).length) where.company = companyFilter;
 
-  if (!prefs.allowInternational && !forceSearch) {
-    where.OR = [
-      { country: contains("India") },
-      { city: contains("Bangalore") },
-      { city: contains("Hyderabad") },
-      { city: contains("Pune") },
-      { city: contains("Mumbai") },
-      { city: contains("Delhi") },
-      { city: contains("Chennai") },
-      { city: contains("Gurgaon") },
-      { location: contains("India") },
-      { AND: [{ remoteType: "remote" }, { location: contains("India") }] },
+  if (!prefs.allowInternational) {
+    where.AND = [
+      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+      {
+        OR: [
+          { country: contains("India") },
+          { city: contains("Bangalore") },
+          { city: contains("Bengaluru") },
+          { city: contains("Hyderabad") },
+          { city: contains("Pune") },
+          { city: contains("Mumbai") },
+          { city: contains("Delhi") },
+          { city: contains("Chennai") },
+          { city: contains("Gurgaon") },
+          { city: contains("Gurugram") },
+          { city: contains("Noida") },
+          { location: contains("India") },
+          { AND: [{ remoteType: "remote" }, { location: contains("India") }] },
+        ],
+      },
     ];
   }
 
@@ -146,9 +155,13 @@ export async function GET(request: Request) {
       }),
     ]);
 
-    const statuses = await loadUserStatuses(user?.id, jobs.map((job) => job.id));
+    const finalJobs = !prefs.allowInternational
+      ? jobs.filter((job) => passesInternationalFilter(job, false))
+      : jobs;
+
+    const statuses = await loadUserStatuses(user?.id, finalJobs.map((job) => job.id));
     return json({
-      jobs: jobs.map((job) =>
+      jobs: finalJobs.map((job) =>
         serializeJob(job, { excerpt: true, userStatus: statuses.get(job.id) ?? (user ? "unseen" : job.userStatus) })
       ),
       page,
@@ -167,6 +180,7 @@ export async function GET(request: Request) {
   });
 
   const filtered = jobs.filter((job) => {
+    if (!prefs.allowInternational && !passesInternationalFilter(job, false)) return false;
     if (jobMatchesExcluded(job.title, prefs)) return false;
     if (experience === "new-grad") {
       const blob = `${job.title} ${job.experienceLevel} ${job.description}`.toLowerCase();

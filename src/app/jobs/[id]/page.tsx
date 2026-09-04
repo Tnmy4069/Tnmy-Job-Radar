@@ -9,8 +9,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { analysisFromJob } from "@/lib/ai/dto";
 import { Badge } from "@/components/ui/badge";
 
-// @ts-expect-error Types issue with dynamic segments
-export default async function JobPage({ params }: { params: { id: string } }) {
+export default async function JobPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const job = await prisma.job.findUnique({
     where: { id },

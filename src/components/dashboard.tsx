@@ -8,6 +8,7 @@ import { JobCard } from "@/components/job-card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { JobDTO } from "@/lib/types";
+import { isIndiaLocation } from "@/lib/location";
 
 export function Dashboard() {
   const [jobs, setJobs] = useState<JobDTO[]>([]);
@@ -19,7 +20,8 @@ export function Dashboard() {
         const res = await fetch("/api/jobs?limit=5&sort=ai&relevant=true");
         if (res.ok) {
           const data = await res.json();
-          setJobs(data.items || []);
+          const raw: JobDTO[] = data.jobs || data.items || [];
+          setJobs(raw.filter((j) => isIndiaLocation(j.city ?? "", j.country ?? "", j.remoteType, j.location)));
         }
       } catch (err) {
         console.error(err);

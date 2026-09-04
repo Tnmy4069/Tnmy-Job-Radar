@@ -234,10 +234,15 @@ export function normalizeLocation(rawLocation: string, storedCountry?: string) {
   return { rawLocation: raw, city, country, location };
 }
 
-export function isIndiaLocation(city: string, country: string, remoteType?: string): boolean {
+export function isIndiaLocation(
+  city: string,
+  country: string,
+  remoteType?: string,
+  location?: string
+): boolean {
   if (country === "India") return true;
-  const hay = `${city} ${country} ${remoteType ?? ""}`.toLowerCase();
-  return /\bindia\b|bangalore|bengaluru|hyderabad|pune|mumbai|delhi|gurgaon|gurugram|noida|chennai|remote india/.test(
+  const hay = `${city} ${country} ${location ?? ""} ${remoteType ?? ""}`.toLowerCase();
+  return /\bindia\b|bangalore|bengaluru|hyderabad|pune|mumbai|delhi|gurgaon|gurugram|noida|chennai|kolkata|ahmedabad|kochi|indore|coimbatore|remote india/.test(
     hay
   );
 }

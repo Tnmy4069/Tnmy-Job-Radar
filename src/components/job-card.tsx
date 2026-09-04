@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Bookmark, Check, ExternalLink, MapPin, Building2, Clock, Sparkles } from "lucide-react";
+import { Bookmark, Briefcase, Check, ExternalLink, MapPin, Building2, Clock, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { JobDTO } from "@/lib/types";

@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import type { JobDTO } from "@/lib/types";
 import { cn, formatDuration } from "@/lib/utils";
 import { notifyNewJobs } from "@/components/notifications";
+import { isIndiaLocation } from "@/lib/location";
 
 type Stats = {
   relevant: number;
@@ -182,10 +183,14 @@ export function JobsList() {
     const jobsP = fetch(`/api/jobs?${query}`)
       .then((r) => r.json())
       .then((jobsRes) => {
-        setJobs(jobsRes.jobs ?? []);
-        setTotal(jobsRes.total ?? 0);
+        const rawJobs: JobDTO[] = jobsRes.jobs ?? [];
+        const indiaOnly = rawJobs.filter((job) =>
+          isIndiaLocation(job.city ?? "", job.country ?? "", job.remoteType, job.location)
+        );
+        setJobs(indiaOnly);
+        setTotal(jobsRes.total ?? indiaOnly.length);
         setLoadPercent((value) => Math.max(value, 84));
-        pushLog(`Loaded ${jobsRes.jobs?.length ?? 0} jobs · ${jobsRes.total ?? 0} in this filter`, true);
+        pushLog(`Loaded ${indiaOnly.length} jobs · ${jobsRes.total ?? indiaOnly.length} in this filter`, true);
         return jobsRes;
       })
       .catch(() => {
@@ -220,9 +225,13 @@ export function JobsList() {
     const recRes = await fetch(`/api/ai/recommended?limit=12${analyze ? "&analyze=1" : ""}`)
       .then((r) => r.json())
       .catch(() => ({ jobs: [], analyzing: false }));
-    setRecommended(recRes.jobs ?? []);
+    const rawRec: JobDTO[] = recRes.jobs ?? [];
+    const indiaOnly = rawRec.filter((job) =>
+      isIndiaLocation(job.city ?? "", job.country ?? "", job.remoteType, job.location)
+    );
+    setRecommended(indiaOnly);
     if (analyze) setRecommendedAnalyzing(Boolean(recRes.analyzing));
-    else if (!(recRes.jobs ?? []).some((job: JobDTO) => job.aiStatus && job.aiStatus !== "ANALYZED")) {
+    else if (!indiaOnly.some((job: JobDTO) => job.aiStatus && job.aiStatus !== "ANALYZED")) {
       setRecommendedAnalyzing(false);
     }
     setRecommendedLoading(false);
@@ -303,8 +312,8 @@ export function JobsList() {
   }
 
   return (
-    <div className="flex flex-col lg:flex-row gap-6 pb-12 animate-in fade-in duration-500 pt-6">
-      <aside className="w-full lg:w-64 shrink-0 flex flex-col gap-5">
+    <div className="flex flex-col lg:flex-row gap-8 pb-12 animate-in fade-in duration-500 pt-6 px-4 sm:px-6 lg:px-8">
+      <aside className="w-full lg:w-72 shrink-0 flex flex-col gap-5 rounded-xl border border-border/80 bg-card/40 p-4 sm:p-5 lg:sticky lg:top-4 lg:h-fit shadow-xs">
         <div>
           <h2 className="text-sm font-semibold tracking-tight mb-3">Search & Filters</h2>
           <div className="relative">

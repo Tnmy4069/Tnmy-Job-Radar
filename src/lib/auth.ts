@@ -66,18 +66,22 @@ export async function clearSession() {
 }
 
 export async function getCurrentUser() {
-  const jar = await cookies();
-  const token = jar.get(SESSION_COOKIE)?.value;
-  if (!token) return null;
-  const session = await prisma.session.findUnique({
-    where: { token },
-    include: { user: true },
-  });
-  if (!session || session.expiresAt.getTime() < Date.now()) {
-    if (session) await prisma.session.delete({ where: { id: session.id } }).catch(() => undefined);
+  try {
+    const jar = await cookies();
+    const token = jar.get(SESSION_COOKIE)?.value;
+    if (!token) return null;
+    const session = await prisma.session.findUnique({
+      where: { token },
+      include: { user: true },
+    });
+    if (!session || session.expiresAt.getTime() < Date.now()) {
+      if (session) await prisma.session.delete({ where: { id: session.id } }).catch(() => undefined);
+      return null;
+    }
+    return session.user;
+  } catch {
     return null;
   }
-  return session.user;
 }
 
 export async function requireUser() {
