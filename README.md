@@ -2,7 +2,7 @@
 
 Discover software engineering jobs from **official company career pages and ATS APIs**, rank them for an early-career (0–2 years) profile, and track apply status.
 
-The app never invents jobs. Unavailable sources are marked `unsupported` or `failed`.
+The app never invents jobs. Unavailable seeources are marked `unsupported` or `failed`.
 
 ## Architecture
 
