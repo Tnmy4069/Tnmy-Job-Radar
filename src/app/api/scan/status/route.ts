@@ -4,9 +4,48 @@ import { getCurrentRunId, isScanRunning } from "@/lib/scanner/service";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const [latest, companies, logs] = await Promise.all([
-    prisma.scanRun.findFirst({ orderBy: { startedAt: "desc" } }),
+export async function GET(request: Request) {
+  const light = new URL(request.url).searchParams.get("light") === "1";
+  const [latest, enabledTotal] = await Promise.all([
+    prisma.scanRun.findFirst({
+      orderBy: { startedAt: "desc" },
+      select: {
+        id: true,
+        status: true,
+        startedAt: true,
+        finishedAt: true,
+        durationMs: true,
+        companies: true,
+        jobsFound: true,
+        jobsNew: true,
+        jobsRelevant: true,
+        okCount: true,
+        failedCount: true,
+        unsupportedCount: true,
+      },
+    }),
+    prisma.company.count({ where: { enabled: true } }),
+  ]);
+
+  if (light) {
+    return json({
+      running: isScanRunning(),
+      runId: getCurrentRunId(),
+      latest,
+      companies: [],
+      logs: [],
+      summary: {
+        enabledTotal,
+        ok: latest?.okCount ?? 0,
+        failed: latest?.failedCount ?? 0,
+        unsupported: latest?.unsupportedCount ?? 0,
+        blocked: 0,
+        idle: 0,
+      },
+    });
+  }
+
+  const [companies, logs] = await Promise.all([
     prisma.company.findMany({
       where: { enabled: true },
       orderBy: { lastCheckedAt: "desc" },
@@ -41,8 +80,6 @@ export async function GET() {
       include: { company: { select: { name: true, slug: true } } },
     }),
   ]);
-
-  const enabledTotal = await prisma.company.count({ where: { enabled: true } });
 
   return json({
     running: isScanRunning(),

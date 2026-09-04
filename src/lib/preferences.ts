@@ -41,10 +41,20 @@ function mapPreference(row: {
   };
 }
 
+const prefCache = new Map<string, { value: StoredPreferences; expires: number }>();
+
 export async function getPreferences(userId?: string | null): Promise<StoredPreferences> {
+  const key = userId || "default";
+  const cached = prefCache.get(key);
+  if (cached && cached.expires > Date.now()) return cached.value;
+
   if (userId) {
     const own = await prisma.preference.findUnique({ where: { id: userId } });
-    if (own) return mapPreference(own);
+    if (own) {
+      const mapped = mapPreference(own);
+      prefCache.set(key, { value: mapped, expires: Date.now() + 15_000 });
+      return mapped;
+    }
   }
 
   const row =
@@ -60,7 +70,9 @@ export async function getPreferences(userId?: string | null): Promise<StoredPref
       },
     }));
 
-  return mapPreference(row);
+  const mapped = mapPreference(row);
+  prefCache.set(key, { value: mapped, expires: Date.now() + 15_000 });
+  return mapped;
 }
 
 export function frequencyToMs(value: string): number | null {

@@ -1,5 +1,8 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  // Vercel/serverless: skip seed + background workers on every cold start.
+  if (process.env.VERCEL) return;
+
   const { seedDatabase } = await import("./lib/seed/run");
   const { startLocalScheduler } = await import("./lib/scanner/scheduler");
   try {

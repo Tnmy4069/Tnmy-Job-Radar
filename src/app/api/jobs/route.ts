@@ -8,6 +8,7 @@ import { getPreferences } from "@/lib/preferences";
 import { citySortKey, countrySortKey } from "@/lib/location";
 import { jobMatchesExcluded, parseSearchQuery, rankSearchJob } from "@/lib/search";
 import { serializeJobAi } from "@/lib/ai/dto";
+import { JOB_CARD_SELECT } from "@/lib/jobs/list-select";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,7 @@ export async function GET(request: Request) {
   const freshness = searchParams.get("freshness") ?? "";
   const status = searchParams.get("status") ?? "";
   const company = searchParams.get("company") ?? "";
-  const sort = searchParams.get("sort") ?? "best";
+  const sort = searchParams.get("sort") ?? "newest";
   const relevant = searchParams.get("relevant");
   const isNew = searchParams.get("isNew");
   const active = searchParams.get("active") ?? "true";
@@ -138,7 +139,7 @@ export async function GET(request: Request) {
       prisma.job.count({ where }),
       prisma.job.findMany({
         where,
-        include: { company: true },
+        select: JOB_CARD_SELECT,
         orderBy,
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -160,9 +161,9 @@ export async function GET(request: Request) {
   // Experience / role filters still need a bounded in-memory pass
   const jobs = await prisma.job.findMany({
     where,
-    include: { company: true },
+    select: { ...JOB_CARD_SELECT, description: true },
     orderBy,
-    take: 800,
+    take: 400,
   });
 
   const filtered = jobs.filter((job) => {
@@ -230,7 +231,7 @@ export function serializeJob(
   job: {
     id: string;
     title: string;
-    description: string;
+    description?: string;
     location: string;
     rawLocation?: string;
     city?: string;
@@ -288,9 +289,10 @@ export function serializeJob(
   },
   options: { excerpt?: boolean; userStatus?: string } = {}
 ) {
+  const rawDescription = job.description ?? "";
   const description = options.excerpt
-    ? job.description.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 280)
-    : job.description;
+    ? rawDescription.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 280)
+    : rawDescription;
   return {
     id: job.id,
     title: job.title,

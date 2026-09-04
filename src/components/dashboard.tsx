@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { RefreshCw, Search } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, RefreshCw, Search } from "lucide-react";
 import { EmptyHint, PageIntro } from "@/components/app-shell";
 import { JobCard } from "@/components/job-card";
 import { Button } from "@/components/ui/button";
@@ -78,6 +78,16 @@ const TIERS = [
   { id: "saas", label: "SaaS" },
   { id: "ai", label: "AI" },
 ];
+type LoadLog = { id: number; text: string; ok?: boolean };
+
+const LOAD_TIPS = [
+  "Official career pages only — no job-board scrapes.",
+  "Newest first, so fresh postings rise to the top.",
+  "Expand Recommended when you want Gemini to rank fit.",
+  "70+ match is the default early-career cut.",
+  "Save a role and it stays on this device profile.",
+];
+
 const FRESHNESS = [
   { id: "", label: "Any time" },
   { id: "today", label: "Today" },
@@ -92,13 +102,14 @@ export function Dashboard() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
+  const [qDebounced, setQDebounced] = useState("");
   const [minScore, setMinScore] = useState(70);
   const [experience, setExperience] = useState("");
   const [location, setLocation] = useState("");
   const [role, setRole] = useState("");
   const [tier, setTier] = useState("");
   const [freshness, setFreshness] = useState("");
-  const [sort, setSort] = useState("best");
+  const [sort, setSort] = useState("newest");
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
@@ -107,6 +118,18 @@ export function Dashboard() {
   const [scanLatest, setScanLatest] = useState<ScanLatest>(null);
   const [scanSummary, setScanSummary] = useState<ScanSummary | null>(null);
   const [recommended, setRecommended] = useState<JobDTO[]>([]);
+  const [recommendedOpen, setRecommendedOpen] = useState(false);
+  const [recommendedLoading, setRecommendedLoading] = useState(false);
+  const [recommendedAnalyzing, setRecommendedAnalyzing] = useState(false);
+  const [loadPercent, setLoadPercent] = useState(0);
+  const [loadLabel, setLoadLabel] = useState("Starting…");
+  const [loadLogs, setLoadLogs] = useState<LoadLog[]>([]);
+  const logId = useRef(0);
+
+  const pushLog = useCallback((text: string, ok = false) => {
+    const id = ++logId.current;
+    setLoadLogs((current) => [...current.slice(-7), { id, text, ok }]);
+  }, []);
 
   const query = useMemo(() => {
     const params = new URLSearchParams({
@@ -116,7 +139,7 @@ export function Dashboard() {
       minScore: String(minScore),
       relevant: minScore > 0 ? "true" : "",
     });
-    if (q) params.set("q", q);
+    if (qDebounced) params.set("q", qDebounced);
     if (experience) params.set("experience", experience);
     if (location) params.set("location", location);
     if (role) params.set("role", role);
@@ -124,38 +147,100 @@ export function Dashboard() {
     if (freshness) params.set("freshness", freshness);
     if (status) params.set("status", status);
     return params.toString();
-  }, [page, q, minScore, experience, location, role, tier, freshness, sort, status]);
+  }, [page, qDebounced, minScore, experience, location, role, tier, freshness, sort, status]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setQDebounced(q), 300);
+    return () => clearTimeout(timer);
+  }, [q]);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [jobsRes, statsRes, scanRes, recRes] = await Promise.all([
-      fetch(`/api/jobs?${query}`).then((r) => r.json()),
-      fetch("/api/stats").then((r) => r.json()),
-      fetch("/api/scan/status").then((r) => r.json()),
-      fetch("/api/ai/recommended").then((r) => r.json()).catch(() => ({ jobs: [] })),
-    ]);
-    setJobs(jobsRes.jobs ?? []);
-    setTotal(jobsRes.total ?? 0);
-    setStats(statsRes);
+    setLoadPercent(6);
+    setLoadLabel("Waking the radar…");
+    pushLog("Connecting to Job Radar");
+
+    setLoadPercent(18);
+    setLoadLabel("Reading your match stats…");
+    pushLog("Fetching relevant / new / saved counts");
+    const statsP = fetch("/api/stats")
+      .then((r) => r.json())
+      .then((statsRes) => {
+        setStats(statsRes);
+        setLoadPercent((value) => Math.max(value, 46));
+        pushLog(`Stats ready · ${statsRes.relevant ?? 0} relevant roles`, true);
+        return statsRes;
+      })
+      .catch(() => {
+        pushLog("Stats timed out — continuing with jobs");
+        return null;
+      });
+
+    setLoadPercent((value) => Math.max(value, 28));
+    setLoadLabel("Pulling newest official jobs…");
+    pushLog("Loading newest listings from the database");
+    const jobsP = fetch(`/api/jobs?${query}`)
+      .then((r) => r.json())
+      .then((jobsRes) => {
+        setJobs(jobsRes.jobs ?? []);
+        setTotal(jobsRes.total ?? 0);
+        setLoadPercent((value) => Math.max(value, 84));
+        pushLog(`Loaded ${jobsRes.jobs?.length ?? 0} jobs · ${jobsRes.total ?? 0} in this filter`, true);
+        return jobsRes;
+      })
+      .catch(() => {
+        pushLog("Job list failed — retry Scan now if this stays empty");
+        return null;
+      });
+
+    await Promise.all([jobsP, statsP]);
+    setLoadPercent(100);
+    setLoadLabel("Feed is ready");
+    pushLog("Home screen ready — newest first", true);
+    setLoading(false);
+  }, [query, pushLog]);
+
+  const loadScan = useCallback(async (full = false) => {
+    const scanRes = await fetch(full ? "/api/scan/status" : "/api/scan/status?light=1").then((r) => r.json());
     setScanCompanies(scanRes.companies ?? []);
     setScanLatest(scanRes.latest ?? null);
     setScanSummary(scanRes.summary ?? null);
-    setRecommended(recRes.jobs ?? []);
     if (scanRes.running) setScanning(true);
-    setLoading(false);
-  }, [query]);
+    if (scanRes.latest) {
+      pushLog(
+        `Last scan · ${scanRes.latest.jobsFound ?? 0} fetched · ${scanRes.latest.jobsRelevant ?? 0} relevant`,
+        true
+      );
+    }
+    return scanRes;
+  }, [pushLog]);
+
+  const loadRecommended = useCallback(async (analyze = false) => {
+    setRecommendedLoading(true);
+    const recRes = await fetch(`/api/ai/recommended?limit=12${analyze ? "&analyze=1" : ""}`)
+      .then((r) => r.json())
+      .catch(() => ({ jobs: [], analyzing: false }));
+    setRecommended(recRes.jobs ?? []);
+    if (analyze) setRecommendedAnalyzing(Boolean(recRes.analyzing));
+    else if (!(recRes.jobs ?? []).some((job: JobDTO) => job.aiStatus && job.aiStatus !== "ANALYZED")) {
+      setRecommendedAnalyzing(false);
+    }
+    setRecommendedLoading(false);
+    return recRes;
+  }, []);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   useEffect(() => {
+    void loadScan(false);
+  }, [loadScan]);
+
+  useEffect(() => {
     if (!scanning) return;
     const timer = setInterval(async () => {
-      const scanRes = await fetch("/api/scan/status").then((r) => r.json());
-      setScanCompanies(scanRes.companies ?? []);
-      setScanLatest(scanRes.latest ?? null);
-      setScanSummary(scanRes.summary ?? null);
+      const scanRes = await loadScan(false);
       if (!scanRes.running) {
         clearInterval(timer);
         setScanning(false);
@@ -172,7 +257,21 @@ export function Dashboard() {
       }
     }, 2000);
     return () => clearInterval(timer);
-  }, [scanning, load]);
+  }, [scanning, load, loadScan]);
+
+  useEffect(() => {
+    if (!recommendedOpen || !recommendedAnalyzing) return;
+    let ticks = 0;
+    const timer = setInterval(() => {
+      ticks += 1;
+      void loadRecommended(false);
+      if (ticks >= 5) {
+        setRecommendedAnalyzing(false);
+        clearInterval(timer);
+      }
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [recommendedOpen, recommendedAnalyzing, loadRecommended]);
 
   async function updateStatus(id: string, next: string) {
     await fetch(`/api/jobs/${id}/status`, {
@@ -227,18 +326,7 @@ export function Dashboard() {
 
       {scanMessage ? <p className="mb-4 text-xs text-muted-foreground">{scanMessage}</p> : null}
 
-      {recommended.length ? (
-        <section className="mb-6">
-          <h2 className="mb-3 text-sm font-medium">Recommended for you</h2>
-          <div className="grid gap-3">
-            {recommended.slice(0, 8).map((job) => (
-              <JobCard key={`rec-${job.id}`} job={job} onSave={saveJob} onStatus={updateStatus} />
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      <div className="mb-4 flex flex-col gap-3">
+      <div className="mb-5 flex flex-col gap-3">
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
@@ -273,8 +361,8 @@ export function Dashboard() {
             {FRESHNESS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
           </select>
           <select className="h-8 rounded-md border border-border bg-card px-2 text-xs" value={sort} onChange={(e) => { setSort(e.target.value); setPage(1); }}>
-            <option value="best">Best match</option>
             <option value="newest">Newest</option>
+            <option value="best">Best match</option>
             <option value="company">Company</option>
             <option value="location">City</option>
             <option value="country">Country</option>
@@ -290,8 +378,51 @@ export function Dashboard() {
         </div>
       </div>
 
-      {scanCompanies.length ? (
-        <details className="mb-5 rounded-lg border border-border bg-card px-3 py-2 text-xs" open={scanning}>
+      <section className="mb-6 rounded-xl border border-border bg-card">
+        <button
+          type="button"
+          className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium"
+          onClick={() => {
+            const next = !recommendedOpen;
+            setRecommendedOpen(next);
+            if (next && !recommended.length && !recommendedLoading) {
+              void loadRecommended(true);
+            }
+          }}
+        >
+          <span>Recommended for you</span>
+          <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", recommendedOpen && "rotate-180")} />
+        </button>
+        {recommendedOpen ? (
+          <div className="border-t border-border px-4 py-3">
+            {recommendedLoading && !recommended.length ? (
+              <p className="text-xs text-muted-foreground">Loading recommendations…</p>
+            ) : recommended.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No AI recommendations yet.</p>
+            ) : (
+              <div className="grid gap-3">
+                {recommendedAnalyzing ? (
+                  <p className="text-xs text-muted-foreground">Gemini is scoring these roles…</p>
+                ) : null}
+                {recommended.slice(0, 8).map((job) => (
+                  <JobCard key={`rec-${job.id}`} job={job} onSave={saveJob} onStatus={updateStatus} />
+                ))}
+              </div>
+            )}
+          </div>
+        ) : null}
+      </section>
+
+      {scanLatest || scanSummary || scanning ? (
+        <details
+          className="mb-5 rounded-lg border border-border bg-card px-3 py-2 text-xs"
+          open={scanning}
+          onToggle={(event) => {
+            if ((event.target as HTMLDetailsElement).open && scanCompanies.length === 0) {
+              void loadScan(true);
+            }
+          }}
+        >
           <summary className="cursor-pointer text-muted-foreground">
             Last scan status
             {scanLatest?.durationMs != null ? ` · ${formatDuration(scanLatest.durationMs)}` : ""}
@@ -326,11 +457,7 @@ export function Dashboard() {
       ) : null}
 
       {loading ? (
-        <div className="grid gap-3">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-36 animate-pulse rounded-xl bg-muted" />
-          ))}
-        </div>
+        <HomeLoadPanel percent={loadPercent} label={loadLabel} logs={loadLogs} />
       ) : jobs.length === 0 ? (
         <EmptyHint
           title="No matching jobs yet"
@@ -369,6 +496,51 @@ export function Dashboard() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function HomeLoadPanel({
+  percent,
+  label,
+  logs,
+}: {
+  percent: number;
+  label: string;
+  logs: LoadLog[];
+}) {
+  const [tipIndex, setTipIndex] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setTipIndex((value) => (value + 1) % LOAD_TIPS.length), 2800);
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <section className="rounded-xl border border-border bg-card p-5">
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">Loading feed</p>
+          <p className="mt-1 text-4xl font-semibold tabular-nums tracking-tight">{Math.min(100, percent)}%</p>
+          <p className="mt-1 text-sm text-muted-foreground">{label}</p>
+        </div>
+        <p className="max-w-[14rem] text-right text-xs text-muted-foreground">{LOAD_TIPS[tipIndex]}</p>
+      </div>
+      <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-foreground transition-all duration-500 ease-out"
+          style={{ width: `${Math.min(100, percent)}%` }}
+        />
+      </div>
+      <ul className="mt-4 max-h-44 space-y-1.5 overflow-auto font-mono text-xs text-muted-foreground">
+        {logs.map((log) => (
+          <li key={log.id} className="flex gap-2">
+            <span className={log.ok ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}>
+              {log.ok ? "✓" : "›"}
+            </span>
+            <span>{log.text}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
