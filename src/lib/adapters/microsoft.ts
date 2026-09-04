@@ -1,4 +1,6 @@
+import { extractEmbeddedJsonJobs } from "@/lib/discovery/embedded";
 import { fetchJson, fetchText, HttpError } from "@/lib/http";
+import { extractedToNormalized } from "./base";
 import { completeJob, parseRelativeDate } from "./normalize";
 import type { AdapterResult, CompanySource, JobSourceAdapter, NormalizedJob } from "./types";
 
@@ -105,7 +107,20 @@ export class MicrosoftAdapter implements JobSourceAdapter {
       "https://jobs.careers.microsoft.com/global/en/search?q=software%20engineer&l=en_us&pg=1&pgSz=20&o=Recent"
     );
     if (html.length < 200) throw new HttpError("Empty Microsoft careers HTML", 502, "microsoft-html");
-    return [];
+    return extractEmbeddedJsonJobs(html, "https://jobs.careers.microsoft.com/global/en/search").map((job) =>
+      extractedToNormalized(
+        job,
+        {
+          id: "microsoft",
+          name: "Microsoft",
+          slug: "microsoft",
+          careersUrl: "https://jobs.careers.microsoft.com/global/en/search",
+          sourceType: this.type,
+          sourceConfig: {},
+        },
+        job.source === "jsonld" ? "jsonld" : "json"
+      )
+    );
   }
 
   private normalize(job: EightfoldJob): NormalizedJob {

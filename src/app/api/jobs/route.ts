@@ -7,6 +7,7 @@ import { ROLE_FILTERS } from "@/lib/relevance/defaults";
 import { getPreferences } from "@/lib/preferences";
 import { citySortKey, countrySortKey } from "@/lib/location";
 import { jobMatchesExcluded, parseSearchQuery, rankSearchJob } from "@/lib/search";
+import { serializeJobAi } from "@/lib/ai/dto";
 
 export const dynamic = "force-dynamic";
 
@@ -253,6 +254,28 @@ export function serializeJob(
     relevanceScore: number;
     matchReasons: string;
     userStatus: string;
+    aiFitScore?: number | null;
+    aiRecommendation?: string | null;
+    aiSummary?: string | null;
+    aiStrengths?: string | null;
+    aiGaps?: string | null;
+    aiConcerns?: string | null;
+    aiReasoning?: string | null;
+    aiExperienceFit?: string | null;
+    aiSkillFit?: string | null;
+    aiRoleFit?: string | null;
+    aiLocationFit?: string | null;
+    aiRequiredSkillsMatched?: string | null;
+    aiRequiredSkillsMissing?: string | null;
+    aiPreferredSkillsMatched?: string | null;
+    aiPreferredSkillsMissing?: string | null;
+    aiSeniority?: string | null;
+    aiIsEarlyCareer?: boolean | null;
+    aiRequiresSignificantExperience?: boolean | null;
+    aiStatus?: string | null;
+    aiAnalyzedAt?: Date | null;
+    aiModel?: string | null;
+    priorityScore?: number | null;
     company: {
       id: string;
       name: string;
@@ -295,6 +318,7 @@ export function serializeJob(
     relevanceScore: job.relevanceScore,
     matchReasons: parseJsonArray(job.matchReasons),
     userStatus: options.userStatus ?? job.userStatus,
+    ...serializeJobAi(job),
     company: {
       id: job.company.id,
       name: job.company.name,

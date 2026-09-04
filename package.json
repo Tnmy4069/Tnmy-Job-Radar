@@ -10,12 +10,17 @@
     "db:push": "prisma db push",
     "db:seed": "tsx scripts/seed.ts",
     "scan": "tsx scripts/scan.ts",
+    "verify:sources": "tsx scripts/verify-sources.ts",
+    "analyze:ai": "tsx --env-file=.env scripts/analyze-ai.ts",
+    "test": "tsx --test src/lib/discovery/blocks.test.ts src/lib/discovery/robots.test.ts src/lib/discovery/throttle.test.ts src/lib/discovery/deadline.test.ts src/lib/discovery/dates.test.ts src/lib/discovery/urls.test.ts src/lib/discovery/embedded.test.ts src/lib/discovery/quality.test.ts src/lib/discovery/browser.test.ts src/lib/http.test.ts src/lib/adapters/official-pipeline.test.ts src/lib/companies/verify.test.ts src/lib/ai/ai.test.ts",
+    "typecheck": "tsc --noEmit",
     "postinstall": "prisma generate"
   },
   "prisma": {
     "seed": "tsx scripts/seed.ts"
   },
   "dependencies": {
+    "@google/genai": "^2.21.0",
     "@prisma/client": "6.19.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

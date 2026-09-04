@@ -22,6 +22,12 @@ type CompanyDetail = {
   all: number;
   active?: number;
   enabled: boolean;
+  sourceStatus?: string;
+  sourceNotes?: string;
+  consecutiveFailures?: number;
+  sourceVerifiedAt?: string | null;
+  priority?: string;
+  category?: string;
 };
 
 export function CompanyDetailPage({ slug }: { slug: string }) {
@@ -30,6 +36,7 @@ export function CompanyDetailPage({ slug }: { slug: string }) {
   const [company, setCompany] = useState<CompanyDetail | null>(null);
   const [jobs, setJobs] = useState<JobDTO[]>([]);
   const [view, setView] = useState("relevant");
+  const [verifying, setVerifying] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanMessage, setScanMessage] = useState("");
 
@@ -74,13 +81,31 @@ export function CompanyDetailPage({ slug }: { slug: string }) {
     }
   }
 
+  async function verifySource() {
+    if (!company || verifying) return;
+    setVerifying(true);
+    setScanMessage("Verifying official source…");
+    const res = await fetch(`/api/companies/${slug}/verify`, { method: "POST" }).then((r) => r.json());
+    setVerifying(false);
+    setScanMessage(
+      res.result
+        ? `${res.result.sourceStatus}: ${res.result.jobsFound} jobs`
+        : res.message ?? "Verify failed"
+    );
+    await load(view);
+  }
+
   async function toggle() {
     if (!company) return;
-    await fetch(`/api/companies/${slug}`, {
+    const res = await fetch(`/api/companies/${slug}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled: !company.enabled }),
     });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setScanMessage(data.error ?? "Could not update company");
+    }
     await load(view);
   }
 
@@ -94,6 +119,9 @@ export function CompanyDetailPage({ slug }: { slug: string }) {
         action={
           isAdmin ? (
             <div className="flex gap-2">
+              <Button variant="outline" onClick={verifySource} disabled={verifying}>
+                {verifying ? "Verifying…" : "Verify source"}
+              </Button>
               <Button variant="outline" onClick={toggle}>
                 {company.enabled ? "Disable" : "Enable"}
               </Button>
@@ -106,13 +134,18 @@ export function CompanyDetailPage({ slug }: { slug: string }) {
       />
       <div className="mb-5 flex flex-wrap gap-4 text-sm text-muted-foreground">
         <span>Last checked {timeAgo(company.lastCheckedAt)}</span>
-        <span className="capitalize">{company.checkStatus}</span>
+        <span>{company.sourceStatus ?? company.checkStatus}</span>
+        {company.priority ? <span>Priority {company.priority}</span> : null}
+        {company.consecutiveFailures ? <span>{company.consecutiveFailures} consecutive failures</span> : null}
         <span>{company.sourceType}</span>
         <a href={company.careersUrl} target="_blank" rel="noreferrer" className="text-foreground">
           Careers page
         </a>
       </div>
       {scanMessage ? <p className="mb-2 text-xs text-muted-foreground">{scanMessage}</p> : null}
+      {company.sourceNotes ? (
+        <p className="mb-2 text-xs text-muted-foreground">{company.sourceNotes}</p>
+      ) : null}
       {company.lastError ? (
         <p className="mb-4 text-xs text-amber-600 dark:text-amber-400">{company.lastError}</p>
       ) : null}

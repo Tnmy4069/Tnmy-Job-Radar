@@ -1,3 +1,6 @@
+import type { BlockReason } from "@/lib/discovery/blocks";
+import type { ExtractionMethod } from "@/lib/discovery/quality";
+
 export type SourceType =
   | "greenhouse"
   | "lever"
@@ -38,12 +41,27 @@ export type NormalizedJob = {
   sourceUrl: string;
   sourceType: string;
   postedAt?: Date;
+  extractionConfidence?: number;
+};
+
+export type AdapterDiagnostics = {
+  fetched: number;
+  parsed: number;
+  valid: number;
+  rejected: number;
+  duplicates: number;
 };
 
 export type AdapterResult = {
   jobs: NormalizedJob[];
   unsupported?: boolean;
   warning?: string;
+  blockReason?: BlockReason;
+  detectedSourceType?: string;
+  detectedSourceConfig?: Record<string, unknown>;
+  extractionMethod?: ExtractionMethod;
+  diagnostics?: AdapterDiagnostics;
+  jsShell?: boolean;
 };
 
 export interface JobSourceAdapter {
@@ -68,3 +86,4 @@ export type SourceConfig = {
   locationHints?: string[];
   extra?: Record<string, unknown>;
 };
+

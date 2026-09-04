@@ -73,14 +73,27 @@ export async function PATCH(
   const { response } = await requireAdmin();
   if (response) return response;
   const { id } = await context.params;
-  const body = (await request.json().catch(() => ({}))) as { enabled?: boolean };
+  const body = (await request.json().catch(() => ({}))) as {
+    enabled?: boolean;
+    sourceNotes?: string;
+    priority?: string;
+    category?: string;
+  };
   const company = await prisma.company.findFirst({
     where: { OR: [{ id }, { slug: id }] },
   });
   if (!company) return notFound("Company not found");
+  if (body.enabled === true && company.sourceStatus !== "VERIFIED") {
+    return json({ error: "Only VERIFIED sources can be enabled" }, 400);
+  }
   const updated = await prisma.company.update({
     where: { id: company.id },
-    data: { enabled: Boolean(body.enabled) },
+    data: {
+      enabled: typeof body.enabled === "boolean" ? body.enabled : undefined,
+      sourceNotes: typeof body.sourceNotes === "string" ? body.sourceNotes : undefined,
+      priority: body.priority === "A" || body.priority === "B" || body.priority === "C" ? body.priority : undefined,
+      category: typeof body.category === "string" ? body.category : undefined,
+    },
   });
   return json({ company: updated });
 }

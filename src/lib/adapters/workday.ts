@@ -1,3 +1,6 @@
+import { maxPagesPerSource } from "@/lib/discovery/config";
+import { extractionConfidence } from "@/lib/discovery/quality";
+import { rememberIds, shouldStopPagination } from "@/lib/discovery/pagination";
 import { fetchJson } from "@/lib/http";
 import { completeJob, parseRelativeDate } from "./normalize";
 import type { AdapterResult, CompanySource, JobSourceAdapter, NormalizedJob } from "./types";
@@ -23,10 +26,12 @@ export class WorkdayAdapter implements JobSourceAdapter {
     const site = String(company.sourceConfig.site ?? "External");
     const host = String(company.sourceConfig.host ?? `${tenant}.wd5.myworkdayjobs.com`);
     const jobs: NormalizedJob[] = [];
+    const seenIds = new Set<string>();
     let offset = 0;
     const limit = 20;
+    let page = 1;
 
-    while (offset < 200) {
+    while (page <= maxPagesPerSource()) {
       const url = `https://${host}/wday/cxs/${tenant}/${site}/jobs`;
       const data = await fetchJson<WorkdayResponse>(url, {
         method: "POST",
@@ -35,11 +40,14 @@ export class WorkdayAdapter implements JobSourceAdapter {
           appliedFacets: {},
           limit,
           offset,
-          searchText: "software engineer",
+          searchText: "",
         }),
       });
       const batch = data.jobPostings ?? [];
+      const batchIds: string[] = [];
       for (const posting of batch) {
+        const id = posting.bulletFields?.[0] || posting.externalPath;
+        batchIds.push(id);
         const path = posting.externalPath.startsWith("http")
           ? posting.externalPath
           : `https://${host}/en-US/${site}${posting.externalPath}`;
@@ -52,13 +60,26 @@ export class WorkdayAdapter implements JobSourceAdapter {
             sourceUrl: path,
             sourceType: this.type,
             postedAt: parseRelativeDate(posting.postedOn),
+            extractionConfidence: extractionConfidence("api"),
           })
         );
       }
-      if (batch.length < limit) break;
+      if (
+        shouldStopPagination({
+          page,
+          batchIds,
+          seenIds,
+          batchSize: batch.length,
+          pageSize: limit,
+        })
+      ) {
+        break;
+      }
+      rememberIds({ page, seenIds }, batchIds);
       offset += limit;
+      page += 1;
     }
 
-    return { jobs };
+    return { jobs, extractionMethod: "api" };
   }
 }

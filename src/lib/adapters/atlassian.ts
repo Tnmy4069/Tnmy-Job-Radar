@@ -1,4 +1,7 @@
+import { maxPagesPerSource } from "@/lib/discovery/config";
+import { extractEmbeddedJsonJobs } from "@/lib/discovery/embedded";
 import { fetchJson, fetchText } from "@/lib/http";
+import { extractedToNormalized } from "./base";
 import { completeJob } from "./normalize";
 import type { AdapterResult, CompanySource, JobSourceAdapter, NormalizedJob } from "./types";
 
@@ -42,31 +45,47 @@ export class AtlassianAdapter implements JobSourceAdapter {
       const html = await fetchText(company.careersUrl, {
         headers: { Accept: "text/html" },
       });
+      const embedded = extractEmbeddedJsonJobs(html, company.careersUrl).map((job) =>
+        extractedToNormalized(job, company, job.source === "jsonld" ? "jsonld" : "json")
+      );
+      if (embedded.length) return { jobs: embedded, extractionMethod: "json" };
       const jobs = this.fromHtml(html, company.careersUrl);
-      if (jobs.length) return { jobs };
+      if (jobs.length) return { jobs, extractionMethod: "html" };
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error));
     }
 
     try {
-      const data = await fetchJson<{ jobPostings?: { title: string; externalPath: string; locationsText?: string }[] }>(
-        "https://atlassian.wd5.myworkdayjobs.com/wday/cxs/atlassian/atlassian/jobs",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ appliedFacets: {}, limit: 50, offset: 0, searchText: "software" }),
+      const jobs: NormalizedJob[] = [];
+      const limit = 50;
+      let offset = 0;
+      let page = 1;
+      while (page <= maxPagesPerSource()) {
+        const data = await fetchJson<{ jobPostings?: { title: string; externalPath: string; locationsText?: string }[] }>(
+          "https://atlassian.wd5.myworkdayjobs.com/wday/cxs/atlassian/atlassian/jobs",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ appliedFacets: {}, limit, offset, searchText: "" }),
+          }
+        );
+        const batch = data.jobPostings ?? [];
+        for (const job of batch) {
+          jobs.push(
+            completeJob({
+              title: job.title,
+              location: job.locationsText ?? "",
+              applicationUrl: `https://www.atlassian.com/company/careers/details/${job.externalPath.split("/").pop() ?? ""}`,
+              sourceUrl: company.careersUrl,
+              sourceType: this.type,
+            })
+          );
         }
-      );
-      const jobs = (data.jobPostings ?? []).map((job) =>
-        completeJob({
-          title: job.title,
-          location: job.locationsText ?? "",
-          applicationUrl: `https://www.atlassian.com/company/careers/details/${job.externalPath.split("/").pop() ?? ""}`,
-          sourceUrl: company.careersUrl,
-          sourceType: this.type,
-        })
-      );
-      if (jobs.length) return { jobs };
+        if (batch.length < limit) break;
+        offset += limit;
+        page += 1;
+      }
+      if (jobs.length) return { jobs, extractionMethod: "api" };
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error));
     }

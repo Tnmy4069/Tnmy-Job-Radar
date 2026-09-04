@@ -1,17 +1,21 @@
 import { getAdapter, toCompanySource } from "@/lib/adapters/registry";
 import { UnsupportedSourceError } from "@/lib/adapters/types";
+import { companyScanTimeoutMs } from "@/lib/discovery/config";
+import { DeadlineError, withDeadline } from "@/lib/discovery/deadline";
+import { mergeDescription } from "@/lib/discovery/description";
 import { prisma } from "@/lib/db";
 import { buildSearchText, jobFingerprint } from "@/lib/hash";
-import { HttpError } from "@/lib/http";
+import { HttpError, SourceBlockError } from "@/lib/http";
 import { normalizeLocation } from "@/lib/location";
 import { getPreferences } from "@/lib/preferences";
 import { scoreJob } from "@/lib/relevance/engine";
 import { sanitizeJobHtml } from "@/lib/sanitize";
+import { scheduleAiAfterScan } from "@/lib/ai/scan-hook";
 
 type ScanTrigger = "manual" | "scheduled" | "cron";
 
 const MISSING_SCAN_THRESHOLD = 3;
-const CONCURRENCY = 2;
+const CONCURRENCY = Math.min(3, Math.max(1, Number(process.env.SCAN_CONCURRENCY ?? 2) || 2));
 
 let running = false;
 let currentRunId: string | null = null;
@@ -102,8 +106,10 @@ async function runScanBody(runId: string, _trigger: ScanTrigger, companySlug?: s
   try {
     const prefs = await getPreferences();
     const companies = await prisma.company.findMany({
-      where: companySlug ? { slug: companySlug, enabled: true } : { enabled: true },
-      orderBy: { name: "asc" },
+      where: companySlug
+        ? { slug: companySlug, enabled: true, sourceStatus: { notIn: ["UNSUPPORTED", "DISABLED"] } }
+        : { enabled: true, sourceStatus: { notIn: ["UNSUPPORTED", "DISABLED"] } },
+      orderBy: [{ priority: "asc" }, { name: "asc" }],
     });
 
     await mapPool(companies, CONCURRENCY, async (company) => {
@@ -112,12 +118,63 @@ async function runScanBody(runId: string, _trigger: ScanTrigger, companySlug?: s
       let normalized = 0;
       let relevant = 0;
       let newJobs = 0;
+      let updatedJobs = 0;
 
       try {
         const adapter = getAdapter(company.sourceType);
         const source = toCompanySource(company);
-        const result = await adapter.fetchJobs(source);
+        const result = await withDeadline(
+          companyScanTimeoutMs(),
+          () => adapter.fetchJobs(source),
+          `Company scan timed out: ${company.slug}`
+        );
         const now = new Date();
+
+        if (result.detectedSourceType && result.detectedSourceType !== company.sourceType) {
+          let config: Record<string, unknown> = {};
+          try {
+            config = JSON.parse(company.sourceConfig || "{}") as Record<string, unknown>;
+          } catch {
+            config = {};
+          }
+          await prisma.company.update({
+            where: { id: company.id },
+            data: {
+              sourceType: result.detectedSourceType,
+              sourceConfig: JSON.stringify({ ...config, ...(result.detectedSourceConfig ?? {}) }),
+            },
+          });
+        }
+
+        if (result.blockReason) {
+          await prisma.company.update({
+            where: { id: company.id },
+            data: {
+              lastCheckedAt: now,
+              checkStatus: "blocked",
+              lastError: result.warning ?? result.blockReason,
+              lastBlockReason: result.blockReason,
+              lastFailureAt: now,
+              blockedCount: { increment: 1 },
+              rateLimitCount: result.blockReason === "RATE_LIMITED" ? { increment: 1 } : undefined,
+              consecutiveFailures: { increment: 1 },
+            },
+          });
+          await prisma.scanLog.create({
+            data: {
+              runId,
+              companyId: company.id,
+              level: "error",
+              status: "blocked",
+              durationMs: Date.now() - companyStarted,
+              fetched: 0,
+              blockReason: result.blockReason,
+              message: result.warning ?? result.blockReason,
+            },
+          });
+          return;
+        }
+
         const hashes = new Set<string>();
         const incoming = limitJobs(result.jobs);
         fetched = result.jobs.length;
@@ -143,7 +200,11 @@ async function runScanBody(runId: string, _trigger: ScanTrigger, companySlug?: s
             },
             prefs
           );
-          const description = sanitizeJobHtml(job.description || "");
+          const existing = await prisma.job.findUnique({ where: { hash } });
+          const description = mergeDescription(
+            sanitizeJobHtml(job.description || ""),
+            existing?.description ?? ""
+          );
           const searchText = buildSearchText({
             title: job.title,
             company: company.name,
@@ -154,24 +215,23 @@ async function runScanBody(runId: string, _trigger: ScanTrigger, companySlug?: s
             description,
           });
 
-          const existing = await prisma.job.findUnique({ where: { hash } });
           if (existing) {
             await prisma.job.update({
               where: { hash },
               data: {
                 title: job.title,
-                description: description || existing.description,
+                description,
                 location: loc.location || existing.location,
                 rawLocation: loc.rawLocation || existing.rawLocation,
                 city: loc.city || existing.city,
                 country: loc.country || existing.country,
-                employmentType: job.employmentType,
-                experienceLevel: job.experienceLevel,
-                department: job.department,
-                team: job.team,
-                skills: JSON.stringify(job.skills),
-                salary: job.salary,
-                remoteType: job.remoteType,
+                employmentType: job.employmentType || existing.employmentType,
+                experienceLevel: job.experienceLevel || existing.experienceLevel,
+                department: job.department || existing.department,
+                team: job.team || existing.team,
+                skills: JSON.stringify(job.skills?.length ? job.skills : JSON.parse(existing.skills || "[]")),
+                salary: job.salary ?? existing.salary,
+                remoteType: job.remoteType === "unknown" ? existing.remoteType : job.remoteType,
                 applicationUrl: job.applicationUrl,
                 sourceUrl: job.sourceUrl,
                 externalId: job.externalId ?? existing.externalId,
@@ -184,9 +244,11 @@ async function runScanBody(runId: string, _trigger: ScanTrigger, companySlug?: s
                 relevanceScore: scored.score,
                 matchReasons: JSON.stringify(scored.reasons),
                 postedAt: job.postedAt ?? existing.postedAt,
+                extractionConfidence: job.extractionConfidence ?? existing.extractionConfidence,
               },
             });
             jobsUpdated += 1;
+            updatedJobs += 1;
           } else {
             await prisma.job.create({
               data: {
@@ -218,6 +280,7 @@ async function runScanBody(runId: string, _trigger: ScanTrigger, companySlug?: s
                 matchReasons: JSON.stringify(scored.reasons),
                 hash,
                 missingScanCount: 0,
+                extractionConfidence: job.extractionConfidence,
               },
             });
             jobsNew += 1;
@@ -263,6 +326,8 @@ async function runScanBody(runId: string, _trigger: ScanTrigger, companySlug?: s
           }
         }
 
+        const latency = Date.now() - companyStarted;
+        const diagnostics = result.diagnostics;
         const status = result.unsupported ? "unsupported" : "ok";
         if (status === "ok") okCount += 1;
         else unsupportedCount += 1;
@@ -273,48 +338,86 @@ async function runScanBody(runId: string, _trigger: ScanTrigger, companySlug?: s
             lastCheckedAt: now,
             checkStatus: status,
             lastError: result.warning ?? null,
+            lastBlockReason: null,
+            lastSuccessAt: status === "ok" ? now : undefined,
+            lastFailureAt: status === "ok" ? undefined : now,
+            jobsFetched: diagnostics?.fetched ?? fetched,
+            jobsParsed: diagnostics?.parsed ?? normalized,
+            jobsRejected: diagnostics?.rejected ?? 0,
+            averageLatencyMs: latency,
+            consecutiveFailures: status === "ok" && hashes.size > 0 ? 0 : undefined,
+            sourceStatus:
+              status === "ok" && hashes.size > 0
+                ? "VERIFIED"
+                : status === "unsupported"
+                  ? "UNSUPPORTED"
+                  : undefined,
           },
         });
+        const duplicates = diagnostics?.duplicates ?? 0;
+        const rejected = diagnostics?.rejected ?? 0;
+        const valid = diagnostics?.valid ?? normalized;
         await prisma.scanLog.create({
           data: {
             runId,
             companyId: company.id,
             level: result.unsupported ? "warn" : "info",
             status,
-            durationMs: Date.now() - companyStarted,
+            durationMs: latency,
             fetched,
             normalized,
+            parsed: diagnostics?.parsed ?? fetched,
+            valid,
+            rejected,
+            duplicates,
             relevant,
             newJobs,
+            updatedJobs,
             message: result.unsupported
               ? result.warning ?? "Unsupported source"
-              : `Fetched ${incoming.length} jobs (${newJobs} new, ${relevant} relevant)`,
+              : `Fetched: ${fetched} · Parsed: ${diagnostics?.parsed ?? fetched} · Valid: ${valid} · Duplicates: ${duplicates} · New: ${newJobs} · Updated: ${updatedJobs}`,
           },
         });
       } catch (error) {
         errors += 1;
         failedCount += 1;
         const message = formatScanError(error);
+        const blocked = error instanceof SourceBlockError;
+        const unsupported = error instanceof UnsupportedSourceError;
+        const status = unsupported ? "unsupported" : blocked ? "blocked" : "failed";
+        const blockReason = blocked ? error.reason : undefined;
+        const nextFailures = (company.consecutiveFailures ?? 0) + (blocked || unsupported ? 0 : 1);
         await prisma.company.update({
           where: { id: company.id },
           data: {
             lastCheckedAt: new Date(),
-            checkStatus: error instanceof UnsupportedSourceError ? "unsupported" : "failed",
+            checkStatus: status,
             lastError: message,
+            lastBlockReason: blockReason,
+            lastFailureAt: new Date(),
+            failureCount: blocked || unsupported ? undefined : { increment: 1 },
+            blockedCount: blocked ? { increment: 1 } : undefined,
+            rateLimitCount: blockReason === "RATE_LIMITED" ? { increment: 1 } : undefined,
+            averageLatencyMs: Date.now() - companyStarted,
+            consecutiveFailures: blocked || unsupported ? undefined : { increment: 1 },
+            sourceStatus: unsupported ? "UNSUPPORTED" : nextFailures >= 3 ? "FAILED" : undefined,
           },
         });
-        if (error instanceof UnsupportedSourceError) {
-          unsupportedCount += 1;
+        if (unsupported || blocked) {
           failedCount -= 1;
+        }
+        if (unsupported) {
+          unsupportedCount += 1;
         }
         await prisma.scanLog.create({
           data: {
             runId,
             companyId: company.id,
             level: "error",
-            status: error instanceof UnsupportedSourceError ? "unsupported" : "failed",
+            status,
             durationMs: Date.now() - companyStarted,
             message,
+            blockReason,
             details: error instanceof Error ? error.stack?.slice(0, 2000) : undefined,
           },
         });
@@ -383,6 +486,7 @@ async function runScanBody(runId: string, _trigger: ScanTrigger, companySlug?: s
   } finally {
     running = false;
     currentRunId = null;
+    scheduleAiAfterScan();
   }
 }
 
@@ -451,9 +555,16 @@ function limitJobs<T extends { title: string }>(jobs: T[], max = 180): T[] {
 }
 
 function formatScanError(error: unknown): string {
+  if (error instanceof SourceBlockError) {
+    return `${error.reason}: ${error.url}`;
+  }
+  if (error instanceof DeadlineError) {
+    return error.message;
+  }
   if (error instanceof HttpError) {
-    if (error.status === 429) return `Rate limited: ${error.url}`;
-    if (error.status === 401 || error.status === 403) return `Authentication issue: ${error.url}`;
+    if (error.status === 429) return `RATE_LIMITED: ${error.url}`;
+    if (error.status === 401 || error.status === 403) return `ACCESS_DENIED: ${error.url}`;
+    if (error.status === 408) return `Timeout: ${error.url}`;
     return `${error.message} (${error.url})`;
   }
   if (error instanceof Error) return error.message;

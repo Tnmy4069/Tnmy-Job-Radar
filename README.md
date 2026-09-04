@@ -2,7 +2,9 @@
 
 Discover software engineering jobs from **official company career pages and ATS APIs**, rank them for an early-career (0–2 years) profile, and track apply status.
 
-The app never invents jobs. Unavailable seeources are marked `unsupported` or `failed`.
+The app never invents jobs. Unavailable sources are marked `unsupported` or `failed`.
+
+**Job Radar uses official company/ATS career sources and does not rely on third-party job aggregators.**
 
 ## Architecture
 
@@ -55,8 +57,44 @@ Open [http://localhost:3000](http://localhost:3000) and click **Scan now**.
 | `SCAN_SECRET` | Required in production for `/api/cron/scan` |
 | `NEXT_PUBLIC_APP_URL` | Public URL for cron docs |
 | `DISABLE_LOCAL_SCHEDULER` | Set `1` to disable in-process scheduler |
+| `SCAN_CONCURRENCY` | Parallel company scans (1–3, default 2) |
+| `SOURCE_VERIFY_CONCURRENCY` | Parallel source verification (1–3, default 3) |
 
-## Working sources (verified with real fetches)
+## Company coverage
+
+Job Radar uses official company/ATS career sources and does not rely on third-party job aggregators.
+
+| | Count |
+| --- | --- |
+| Tracked | 180 |
+| Verified (enabled) | 108 |
+| Unverified | 0 |
+| Unsupported | 19 |
+| Failed | 53 |
+
+Supported ATS adapters:
+
+- Greenhouse
+- Lever
+- Workday
+- Ashby
+- SmartRecruiters
+- Custom / official JSON (Amazon, Google)
+- Generic official career pages
+
+Seed ATS mix (all tracked companies): Greenhouse 64 · generic 94 · Ashby 11 · Workday 5 · Lever 2 · Amazon / Google / Microsoft / Atlassian 1 each.
+
+Only `sourceStatus = VERIFIED` companies are enabled. Microsoft and Atlassian stay **UNSUPPORTED** and disabled.
+
+Re-verify sources:
+
+```bash
+npm run verify:sources
+```
+
+## Previously confirmed sources
+
+These adapters were not overwritten during expansion:
 
 | Company | Adapter | Status |
 | --- | --- | --- |
@@ -80,7 +118,7 @@ Open [http://localhost:3000](http://localhost:3000) and click **Scan now**.
 | Microsoft | microsoft adapter | UNSUPPORTED (official APIs 403 / unavailable) |
 | Atlassian | atlassian adapter | UNSUPPORTED (careers APIs 404) |
 
-All other seeded companies remain **disabled** until an official public endpoint is confirmed (`NOT_CONFIGURED` / generic).
+Additional companies are enabled only after a live official-source fetch returns real jobs with official application URLs. See `/companies` for verified / unsupported / failed reports.
 
 ## Running scans
 
@@ -91,8 +129,11 @@ npm run scan
 # Full Phase 2 verification (two scans + report)
 npx tsx scripts/phase2-verify.ts
 
-# Enable verified companies after seed
+# Enable previously confirmed companies after seed
 npx tsx scripts/enable-verified.ts
+
+# Verify unverified official sources (does not guess ATS)
+npm run verify:sources
 ```
 
 Manual UI scan starts asynchronously and polls `/api/scan/status`. Overlapping scans return **409**.
@@ -137,10 +178,10 @@ When **Allow international** is off, the jobs feed shows **India only**.
 
 ## Adding a company
 
-1. Add / update [`src/lib/seed/companies.ts`](src/lib/seed/companies.ts)
-2. Point `sourceType` at a working adapter and set `sourceConfig`
-3. **Probe the official endpoint** — only enable after real jobs return
-4. `npx tsx scripts/enable-verified.ts` or enable from the Companies UI
+1. Add / update [`src/lib/seed/companies.ts`](src/lib/seed/companies.ts) or [`src/lib/seed/companies-additional.ts`](src/lib/seed/companies-additional.ts)
+2. New companies start `enabled=false` and `sourceStatus=UNVERIFIED`
+3. **Probe the official endpoint** (`npm run verify:sources` or Verify source in the UI)
+4. Enable only after `sourceStatus=VERIFIED`
 
 ## Adding an adapter
 

@@ -1,3 +1,4 @@
+import { parseJobDate } from "@/lib/discovery/dates";
 import { fetchText } from "@/lib/http";
 import { completeJob } from "./normalize";
 import type { AdapterResult, CompanySource, JobSourceAdapter, NormalizedJob } from "./types";
@@ -74,6 +75,9 @@ export class GoogleAdapter implements JobSourceAdapter {
         window.match(/"([A-Z][A-Za-z .'-]+,\s*(?:[A-Z][A-Za-z .'-]+,\s*)?(?:India|United States|United Kingdom|Canada|Germany|Singapore|Ireland|Switzerland|Japan|Australia))"/) ||
         window.match(/"(Bengaluru|Bangalore|Hyderabad|Pune|Mumbai|Gurugram|Gurgaon|Noida|Chennai|Delhi|Sunnyvale|Mountain View|Seattle|New York|London|Zurich|Dublin|Singapore)[^"]{0,60}"/);
       const descMatch = window.match(/"(<ul[\s\S]{20,1200}<\/ul>)"/);
+      const dateMatch =
+        window.match(/(\d{4}-\d{2}-\d{2}T[\d:.]+Z)/) ||
+        window.match(/Posted (today|yesterday|\d+ days ago|[A-Z][a-z]+ \d{1,2}, \d{4})/i);
       jobs.push(
         completeJob({
           externalId: id,
@@ -83,6 +87,7 @@ export class GoogleAdapter implements JobSourceAdapter {
           applicationUrl,
           sourceUrl,
           sourceType: this.type,
+          postedAt: parseJobDate(dateMatch?.[1] ? decodeJsString(dateMatch[1]) : null) ?? undefined,
         })
       );
     }

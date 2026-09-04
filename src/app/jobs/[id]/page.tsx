@@ -4,7 +4,9 @@ import { ExternalLink, MapPin } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { cn, formatJobFreshness, parseJsonArray, scoreTone } from "@/lib/utils";
 import { JobActions } from "@/components/job-actions";
+import { AiAssessment } from "@/components/ai-assessment";
 import { getCurrentUser } from "@/lib/auth";
+import { analysisFromJob } from "@/lib/ai/dto";
 
 export default async function JobPage({ params }: PageProps<"/jobs/[id]">) {
   const { id } = await params;
@@ -89,6 +91,13 @@ export default async function JobPage({ params }: PageProps<"/jobs/[id]">) {
         </a>
         <JobActions id={job.id} status={userStatus} />
       </div>
+
+      <AiAssessment
+        jobId={job.id}
+        relevanceScore={job.relevanceScore}
+        status={job.aiStatus}
+        initial={analysisFromJob(job)}
+      />
 
       <p className="mt-4 text-xs text-muted-foreground">
         Official career source:{" "}

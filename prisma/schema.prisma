@@ -20,6 +20,25 @@ model Company {
   lastCheckedAt DateTime?
   checkStatus   String    @default("idle")
   lastError     String?
+  lastBlockReason String?
+  lastSuccessAt DateTime?
+  lastFailureAt DateTime?
+  failureCount  Int       @default(0)
+  blockedCount  Int       @default(0)
+  rateLimitCount Int      @default(0)
+  jobsFetched   Int       @default(0)
+  jobsParsed    Int       @default(0)
+  jobsRejected  Int       @default(0)
+  averageLatencyMs Int    @default(0)
+  website       String    @default("")
+  headquarters  String    @default("")
+  category      String    @default("OTHER_PRODUCT")
+  priority      String    @default("B")
+  indiaHiring   String    @default("unknown")
+  sourceStatus  String    @default("UNVERIFIED")
+  sourceVerifiedAt DateTime?
+  consecutiveFailures Int @default(0)
+  sourceNotes   String    @default("")
   jobs          Job[]
   scanLogs      ScanLog[]
   createdAt     DateTime  @default(now())
@@ -27,6 +46,8 @@ model Company {
 
   @@index([enabled, tier])
   @@index([checkStatus])
+  @@index([sourceStatus, priority])
+  @@index([enabled, sourceStatus])
 }
 
 model Job {
@@ -61,6 +82,7 @@ model Job {
   matchReasons     String    @default("[]")
   hash             String    @unique
   missingScanCount Int       @default(0)
+  extractionConfidence Int?
   userStatus       String    @default("unseen")
   seenAt           DateTime?
   savedAt          DateTime?
@@ -68,9 +90,37 @@ model Job {
   interviewAt      DateTime?
   offerAt          DateTime?
   rejectedAt       DateTime?
+
+  aiFitScore       Int?
+  aiRecommendation String?
+  aiSummary        String?
+  aiStrengths      String    @default("[]")
+  aiGaps           String    @default("[]")
+  aiConcerns       String    @default("[]")
+  aiReasoning      String?
+  aiExperienceFit  String?
+  aiSkillFit       String?
+  aiRoleFit        String?
+  aiLocationFit    String?
+  aiRequiredSkillsMatched  String @default("[]")
+  aiRequiredSkillsMissing  String @default("[]")
+  aiPreferredSkillsMatched String @default("[]")
+  aiPreferredSkillsMissing String @default("[]")
+  aiSeniority      String?
+  aiIsEarlyCareer  Boolean?
+  aiRequiresSignificantExperience Boolean?
+  aiStatus         String    @default("NOT_ANALYZED")
+  aiAnalyzedAt     DateTime?
+  aiModel          String?
+  aiPromptVersion  String?
+  aiAnalysisHash   String?
+  aiError          String?
+  priorityScore    Float?
+
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   userJobs         UserJob[]
+  aiQueueItems     AiQueueItem[]
 
   @@index([companyId, isActive])
   @@index([isActive, isRelevant, relevanceScore])
@@ -83,6 +133,37 @@ model Job {
   @@index([country])
   @@index([externalId])
   @@index([searchText])
+  @@index([aiStatus])
+  @@index([aiAnalysisHash])
+  @@index([priorityScore])
+  @@index([isActive, isRelevant, aiFitScore])
+}
+
+model AiQueueItem {
+  id            String    @id @default(cuid()) @map("_id")
+  jobId         String
+  job           Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  status        String    @default("QUEUED")
+  priority      String    @default("NORMAL")
+  priorityRank  Int       @default(50)
+  analysisHash  String
+  attemptCount  Int       @default(0)
+  nextAttemptAt DateTime?
+  lastError     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([jobId, status])
+  @@index([status, priorityRank, nextAttemptAt])
+  @@index([analysisHash])
+}
+
+model AiDailyUsage {
+  id        String   @id @map("_id")
+  jobs      Int      @default(0)
+  tokens    Int      @default(0)
+  requests  Int      @default(0)
+  updatedAt DateTime @updatedAt
 }
 
 model Preference {
@@ -186,8 +267,14 @@ model ScanLog {
   durationMs Int?
   fetched    Int      @default(0)
   normalized Int      @default(0)
+  parsed     Int      @default(0)
+  valid      Int      @default(0)
+  rejected   Int      @default(0)
+  duplicates Int      @default(0)
   relevant   Int      @default(0)
   newJobs    Int      @default(0)
+  updatedJobs Int     @default(0)
+  blockReason String?
   createdAt  DateTime @default(now())
 
   @@index([runId])

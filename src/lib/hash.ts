@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { normalizeApplicationUrl } from "@/lib/discovery/urls";
 
 export function normalizeText(value: string): string {
   return value
@@ -26,7 +27,7 @@ export function jobFingerprint(input: {
     normalizeText(input.company),
     normalizeText(input.title),
     locationPart,
-    input.applicationUrl.trim().toLowerCase().split("?")[0],
+    normalizeApplicationUrl(input.applicationUrl).toLowerCase(),
   ].join("|");
   return createHash("sha256").update(raw).digest("hex");
 }

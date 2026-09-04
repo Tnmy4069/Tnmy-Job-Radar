@@ -43,6 +43,7 @@ type ScanSummary = {
   ok: number;
   failed: number;
   unsupported: number;
+  blocked?: number;
   idle: number;
 };
 
@@ -105,6 +106,7 @@ export function Dashboard() {
   const [scanCompanies, setScanCompanies] = useState<ScanCompany[]>([]);
   const [scanLatest, setScanLatest] = useState<ScanLatest>(null);
   const [scanSummary, setScanSummary] = useState<ScanSummary | null>(null);
+  const [recommended, setRecommended] = useState<JobDTO[]>([]);
 
   const query = useMemo(() => {
     const params = new URLSearchParams({
@@ -126,10 +128,11 @@ export function Dashboard() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [jobsRes, statsRes, scanRes] = await Promise.all([
+    const [jobsRes, statsRes, scanRes, recRes] = await Promise.all([
       fetch(`/api/jobs?${query}`).then((r) => r.json()),
       fetch("/api/stats").then((r) => r.json()),
       fetch("/api/scan/status").then((r) => r.json()),
+      fetch("/api/ai/recommended").then((r) => r.json()).catch(() => ({ jobs: [] })),
     ]);
     setJobs(jobsRes.jobs ?? []);
     setTotal(jobsRes.total ?? 0);
@@ -137,6 +140,7 @@ export function Dashboard() {
     setScanCompanies(scanRes.companies ?? []);
     setScanLatest(scanRes.latest ?? null);
     setScanSummary(scanRes.summary ?? null);
+    setRecommended(recRes.jobs ?? []);
     if (scanRes.running) setScanning(true);
     setLoading(false);
   }, [query]);
@@ -223,6 +227,17 @@ export function Dashboard() {
 
       {scanMessage ? <p className="mb-4 text-xs text-muted-foreground">{scanMessage}</p> : null}
 
+      {recommended.length ? (
+        <section className="mb-6">
+          <h2 className="mb-3 text-sm font-medium">Recommended for you</h2>
+          <div className="grid gap-3">
+            {recommended.slice(0, 8).map((job) => (
+              <JobCard key={`rec-${job.id}`} job={job} onSave={saveJob} onStatus={updateStatus} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       <div className="mb-4 flex flex-col gap-3">
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -286,7 +301,8 @@ export function Dashboard() {
               Companies: {scanSummary?.enabledTotal ?? scanLatest?.companies ?? 0} enabled ·{" "}
               {scanLatest?.okCount ?? scanSummary?.ok ?? 0} ok ·{" "}
               {scanLatest?.failedCount ?? scanSummary?.failed ?? 0} failed ·{" "}
-              {scanLatest?.unsupportedCount ?? scanSummary?.unsupported ?? 0} unsupported
+              {scanLatest?.unsupportedCount ?? scanSummary?.unsupported ?? 0} unsupported ·{" "}
+              {scanSummary?.blocked ?? 0} blocked
               {scanLatest ? (
                 <>
                   {" "}
@@ -404,6 +420,7 @@ function groupedJobs(jobs: JobDTO[], sort: string) {
 function statusGlyph(status: string) {
   if (status === "ok") return "✓";
   if (status === "failed") return "⚠";
+  if (status === "blocked") return "×";
   if (status === "unsupported") return "○";
   return "·";
 }

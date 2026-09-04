@@ -1,4 +1,16 @@
 import type { SourceType } from "@/lib/adapters/types";
+import { ADDITIONAL_COMPANY_SEEDS } from "./companies-additional";
+
+export type CompanyCategory =
+  | "BIG_TECH"
+  | "SAAS"
+  | "DEVTOOLS"
+  | "AI"
+  | "CLOUD"
+  | "FINTECH"
+  | "CONSUMER_TECH"
+  | "INDIAN_PRODUCT"
+  | "OTHER_PRODUCT";
 
 export type CompanySeed = {
   name: string;
@@ -9,7 +21,81 @@ export type CompanySeed = {
   tier: "tier-1" | "indian" | "saas" | "ai";
   enabled?: boolean;
   domain: string;
+  category?: CompanyCategory;
+  priority?: "A" | "B" | "C";
+  indiaHiring?: "true" | "false" | "unknown";
+  sourceStatus?: "VERIFIED" | "UNVERIFIED" | "UNSUPPORTED" | "FAILED" | "DISABLED";
+  sourceNotes?: string;
 };
+
+/** Working official sources already in production. Do not overwrite their adapter config. */
+export const PRESERVE_VERIFIED = new Set([
+  "google",
+  "amazon",
+  "adobe",
+  "stripe",
+  "datadog",
+  "cloudflare",
+  "figma",
+  "nvidia",
+  "gitlab",
+  "twilio",
+  "notion",
+  "dropbox",
+  "okta",
+  "elastic",
+  "openai",
+  "databricks",
+  "glean",
+]);
+
+/** Confirmed unsupported by current adapters. Stay disabled. */
+export const PRESERVE_UNSUPPORTED = new Set(["microsoft", "atlassian"]);
+
+const TIER_CATEGORY: Record<CompanySeed["tier"], CompanyCategory> = {
+  "tier-1": "BIG_TECH",
+  indian: "INDIAN_PRODUCT",
+  saas: "SAAS",
+  ai: "AI",
+};
+
+export function enrichSeed(company: CompanySeed): Required<
+  Pick<CompanySeed, "category" | "priority" | "indiaHiring" | "sourceStatus" | "enabled">
+> &
+  CompanySeed {
+  const verified = PRESERVE_VERIFIED.has(company.slug);
+  const unsupported = PRESERVE_UNSUPPORTED.has(company.slug);
+  return {
+    ...company,
+    category: company.category ?? TIER_CATEGORY[company.tier],
+    priority: company.priority ?? (company.tier === "tier-1" || verified ? "A" : company.tier === "indian" ? "B" : "B"),
+    indiaHiring: company.indiaHiring ?? (company.tier === "indian" ? "true" : "unknown"),
+    sourceStatus: company.sourceStatus ?? (verified ? "VERIFIED" : unsupported ? "UNSUPPORTED" : "UNVERIFIED"),
+    enabled: verified ? true : false,
+    sourceNotes:
+      company.sourceNotes ??
+      (unsupported ? "Official source previously unsupported by current adapters" : ""),
+  };
+}
+
+function dedupeSeeds(seeds: CompanySeed[]): CompanySeed[] {
+  const bySlug = new Map<string, CompanySeed>();
+  const byDomain = new Map<string, string>();
+  for (const seed of seeds) {
+    if (bySlug.has(seed.slug)) continue;
+    const domain = seed.domain.replace(/^www\./, "").toLowerCase();
+    const existingSlug = byDomain.get(domain);
+    if (existingSlug && existingSlug !== seed.slug) {
+      // Related brands (Zomato/Eternal, Amazon/AWS) stay as explicit extra slugs only if already present.
+      if (!PRESERVE_VERIFIED.has(seed.slug) && !COMPANY_SEEDS.some((row) => row.slug === seed.slug)) {
+        continue;
+      }
+    }
+    bySlug.set(seed.slug, enrichSeed(seed));
+    if (!byDomain.has(domain)) byDomain.set(domain, seed.slug);
+  }
+  return [...bySlug.values()];
+}
 
 export const COMPANY_SEEDS: CompanySeed[] = [
   // First-wave official sources
@@ -499,7 +585,7 @@ export const COMPANY_SEEDS: CompanySeed[] = [
     name: "Snowflake",
     slug: "snowflake",
     careersUrl: "https://careers.snowflake.com/",
-    sourceType: "greenhouse",
+    sourceType: "ashby",
     sourceConfig: { boardToken: "snowflake" },
     tier: "ai",
     enabled: false,
@@ -510,7 +596,7 @@ export const COMPANY_SEEDS: CompanySeed[] = [
     slug: "perplexity",
     careersUrl: "https://www.perplexity.ai/careers",
     sourceType: "ashby",
-    sourceConfig: { boardToken: "perplexityai" },
+    sourceConfig: { boardToken: "perplexity" },
     tier: "ai",
     enabled: false,
     domain: "perplexity.ai",
@@ -546,7 +632,7 @@ export const COMPANY_SEEDS: CompanySeed[] = [
     name: "Cohere",
     slug: "cohere",
     careersUrl: "https://cohere.com/careers",
-    sourceType: "greenhouse",
+    sourceType: "ashby",
     sourceConfig: { boardToken: "cohere" },
     tier: "ai",
     enabled: false,
@@ -580,3 +666,6 @@ export const COMPANY_SEEDS: CompanySeed[] = [
     domain: "yellow.ai",
   },
 ];
+
+export const ALL_COMPANY_SEEDS = dedupeSeeds([...COMPANY_SEEDS, ...ADDITIONAL_COMPANY_SEEDS]);
+

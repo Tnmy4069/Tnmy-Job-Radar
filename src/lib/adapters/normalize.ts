@@ -1,3 +1,4 @@
+import { parseJobDate } from "@/lib/discovery/dates";
 import { resolveCountry } from "@/lib/location";
 import type { NormalizedJob, RemoteType } from "./types";
 
@@ -182,29 +183,10 @@ export function completeJob(
     sourceUrl: job.sourceUrl,
     sourceType: job.sourceType,
     postedAt: job.postedAt,
+    extractionConfidence: job.extractionConfidence,
   };
 }
 
 export function parseRelativeDate(value?: string | null): Date | undefined {
-  if (!value) return undefined;
-  const absolute = Date.parse(value);
-  if (!Number.isNaN(absolute)) return new Date(absolute);
-
-  const hay = value.toLowerCase();
-  const now = new Date();
-  const dayMatch = hay.match(/(\d+)\s+day/);
-  if (dayMatch) {
-    now.setDate(now.getDate() - Number(dayMatch[1]));
-    return now;
-  }
-  if (/today|just posted|hours? ago|minutes? ago/.test(hay)) return new Date();
-  if (/yesterday/.test(hay)) {
-    now.setDate(now.getDate() - 1);
-    return now;
-  }
-  if (/30\+/.test(hay)) {
-    now.setDate(now.getDate() - 30);
-    return now;
-  }
-  return undefined;
+  return parseJobDate(value) ?? undefined;
 }

@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { JobDTO } from "@/lib/types";
 import { cn, formatJobFreshness, scoreTone } from "@/lib/utils";
+import { recommendationGlyph, recommendationLabel } from "@/lib/ai/priority";
 
 export function JobCard({
   job,
@@ -16,6 +17,7 @@ export function JobCard({
   onSave: (id: string) => void;
   onStatus: (id: string, status: string) => void;
 }) {
+  const analyzed = job.aiStatus === "ANALYZED" && job.aiFitScore != null;
   return (
     <article className="rounded-xl border border-border bg-card p-4">
       <div className="flex items-start justify-between gap-3">
@@ -47,9 +49,21 @@ export function JobCard({
             <span>{formatJobFreshness(job.postedAt, job.discoveredAt)}</span>
           </div>
         </div>
-        <div className={cn("shrink-0 text-right text-sm font-semibold", scoreTone(job.relevanceScore))}>
-          {job.relevanceScore}%
-          <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Match</div>
+        <div className="shrink-0 text-right">
+          <div className={cn("text-sm font-semibold", scoreTone(job.relevanceScore))}>
+            {job.relevanceScore}%
+            <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Match</div>
+          </div>
+          {analyzed ? (
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              AI Fit {job.aiFitScore}
+              {job.aiRecommendation ? (
+                <div>
+                  {recommendationGlyph(job.aiRecommendation)} {recommendationLabel(job.aiRecommendation)}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
 

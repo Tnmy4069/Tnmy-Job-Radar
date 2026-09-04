@@ -8,4 +8,10 @@ export async function register() {
     console.error("[seed] failed to sync companies", error);
   }
   startLocalScheduler();
+  try {
+    const { kickAiWorkers } = await import("./lib/ai/queue");
+    kickAiWorkers();
+  } catch (error) {
+    console.error("[ai] worker start failed", error instanceof Error ? error.message : error);
+  }
 }

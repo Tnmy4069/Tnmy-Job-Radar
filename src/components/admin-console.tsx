@@ -6,6 +6,7 @@ import { PageIntro } from "@/components/app-shell";
 import { AuthForm } from "@/components/auth-form";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/components/use-auth";
+import type { CompanyCoverage, CompanyDTO } from "@/lib/types";
 import { timeAgo } from "@/lib/utils";
 
 type AdminUser = {
@@ -24,20 +25,70 @@ type Stats = {
   applied: number;
 };
 
+type GeminiStatus = {
+  enabled: boolean;
+  model: string;
+  minScore: number;
+  queue: number;
+  analyzed: number;
+  failed: number;
+  workers: { current: number; limit: number; quotaPaused: boolean; circuit: string };
+  metrics: {
+    successes: number;
+    cacheHits: number;
+    rateLimits: number;
+    retries: number;
+    averageLatencyMs: number;
+  };
+};
+
+type ScanCompany = {
+  name: string;
+  slug: string;
+  checkStatus: string;
+  lastError: string | null;
+  lastBlockReason?: string | null;
+  lastSuccessAt?: string | null;
+  lastFailureAt?: string | null;
+  failureCount?: number;
+  blockedCount?: number;
+  rateLimitCount?: number;
+  jobsFetched?: number;
+  jobsParsed?: number;
+  jobsRejected?: number;
+  averageLatencyMs?: number;
+  sourceType?: string;
+  sourceStatus?: string;
+  consecutiveFailures?: number;
+  sourceNotes?: string;
+};
+
 export function AdminConsole() {
   const { user, loading } = useAuth();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [sources, setSources] = useState<ScanCompany[]>([]);
   const [scanning, setScanning] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const [message, setMessage] = useState("");
+  const [coverage, setCoverage] = useState<CompanyCoverage | null>(null);
+  const [companyRows, setCompanyRows] = useState<CompanyDTO[]>([]);
+  const [gemini, setGemini] = useState<GeminiStatus | null>(null);
 
   async function load() {
-    const [usersRes, statsRes] = await Promise.all([
+    const [usersRes, statsRes, scanRes, companyRes, geminiRes] = await Promise.all([
       fetch("/api/admin/users").then((r) => r.json()),
       fetch("/api/stats").then((r) => r.json()),
+      fetch("/api/scan/status").then((r) => r.json()),
+      fetch("/api/companies").then((r) => r.json()),
+      fetch("/api/ai/status").then((r) => r.json()),
     ]);
     setUsers(usersRes.users ?? []);
     setStats(statsRes);
+    setSources(scanRes.companies ?? []);
+    setCoverage(companyRes.coverage ?? null);
+    setCompanyRows(companyRes.companies ?? []);
+    if (geminiRes && !geminiRes.error) setGemini(geminiRes);
   }
 
   useEffect(() => {
@@ -74,9 +125,29 @@ export function AdminConsole() {
         title="Control plane"
         description={`Signed in as ${user.email}. Manage candidates, scans, and system matching.`}
         action={
-          <Button onClick={scanNow} disabled={scanning}>
-            {scanning ? "Scanning…" : "Scan now"}
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              disabled={verifying || scanning}
+              onClick={async () => {
+                setVerifying(true);
+                setMessage("Verifying official sources…");
+                const res = await fetch("/api/companies/verify", { method: "POST" }).then((r) => r.json());
+                setVerifying(false);
+                setMessage(
+                  res.ok
+                    ? `Verified ${res.verified} · unsupported ${res.unsupported} · failed ${res.failed}`
+                    : res.message ?? "Verify failed"
+                );
+                await load();
+              }}
+            >
+              {verifying ? "Verifying…" : "Verify sources"}
+            </Button>
+            <Button onClick={scanNow} disabled={scanning || verifying}>
+              {scanning ? "Scanning…" : "Scan now"}
+            </Button>
+          </div>
         }
       />
       {message ? <p className="mb-4 text-xs text-muted-foreground">{message}</p> : null}
@@ -99,6 +170,96 @@ export function AdminConsole() {
         <Link href="/" className="rounded-md border border-border px-3 py-1.5">
           Job feed
         </Link>
+      </div>
+
+      {coverage ? (
+        <p className="mb-6 text-xs text-muted-foreground">
+          Tracked {coverage.tracked} · Verified {coverage.verified} · Unverified {coverage.unverified} ·
+          Unsupported {coverage.unsupported} · Failed {coverage.failed}
+        </p>
+      ) : null}
+
+      {gemini ? (
+        <section className="mb-6 rounded-xl border border-border p-4 text-xs">
+          <p className="font-medium">Gemini</p>
+          <p className="mt-2 text-muted-foreground">
+            Queue: {gemini.queue} · Workers: {gemini.workers.current}/{gemini.workers.limit} · Success:{" "}
+            {gemini.metrics.successes} · Cache hits: {gemini.metrics.cacheHits} · 429s:{" "}
+            {gemini.metrics.rateLimits} · Retries: {gemini.metrics.retries} · Avg latency:{" "}
+            {gemini.metrics.averageLatencyMs}ms
+          </p>
+          <p className="mt-1 text-muted-foreground">
+            Model: {gemini.model} · Threshold: {gemini.minScore} · Analyzed: {gemini.analyzed} · Failed:{" "}
+            {gemini.failed} · Circuit: {gemini.workers.circuit}
+            {gemini.workers.quotaPaused ? " · quota paused" : ""}
+          </p>
+        </section>
+      ) : null}
+
+      <h2 className="mb-3 text-sm font-medium">Source health</h2>
+      <div className="mb-6 overflow-x-auto rounded-xl border border-border">
+        <table className="w-full text-left text-xs">
+          <thead className="bg-muted text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 font-medium">Company</th>
+              <th className="px-3 py-2 font-medium">Status</th>
+              <th className="px-3 py-2 font-medium">Fetched / parsed / rejected</th>
+              <th className="px-3 py-2 font-medium">Blocks</th>
+              <th className="px-3 py-2 font-medium">Last error</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sources.map((company) => (
+              <tr key={company.slug} className="border-t border-border">
+                <td className="px-3 py-2">
+                  {company.name}
+                  <div className="text-muted-foreground">{company.sourceType}</div>
+                </td>
+                <td className="px-3 py-2 capitalize">
+                  {company.sourceStatus ?? company.checkStatus}
+                  {company.consecutiveFailures ? ` · ${company.consecutiveFailures} fails` : ""}
+                </td>
+                <td className="px-3 py-2">
+                  {company.jobsFetched ?? 0} / {company.jobsParsed ?? 0} / {company.jobsRejected ?? 0}
+                </td>
+                <td className="px-3 py-2">
+                  {company.blockedCount ?? 0}
+                  {company.lastBlockReason ? ` · ${company.lastBlockReason}` : ""}
+                </td>
+                <td className="max-w-xs truncate px-3 py-2 text-muted-foreground">
+                  {company.lastError || "—"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mb-6 grid gap-4 text-xs md:grid-cols-2">
+        <div className="rounded-xl border border-border p-4">
+          <p className="font-medium">Unsupported</p>
+          <ul className="mt-2 max-h-40 space-y-1 overflow-auto text-muted-foreground">
+            {companyRows
+              .filter((row) => row.sourceStatus === "UNSUPPORTED")
+              .map((row) => (
+                <li key={row.slug}>
+                  {row.name} — {row.sourceNotes || "Current adapter unsupported"}
+                </li>
+              ))}
+          </ul>
+        </div>
+        <div className="rounded-xl border border-border p-4">
+          <p className="font-medium">Failed sources</p>
+          <ul className="mt-2 max-h-40 space-y-1 overflow-auto text-muted-foreground">
+            {companyRows
+              .filter((row) => row.sourceStatus === "FAILED")
+              .map((row) => (
+                <li key={row.slug}>
+                  {row.name} — {row.lastError || "failed"} · {row.consecutiveFailures ?? 0} failures
+                </li>
+              ))}
+          </ul>
+        </div>
       </div>
 
       <h2 className="mb-3 text-sm font-medium">Accounts</h2>
