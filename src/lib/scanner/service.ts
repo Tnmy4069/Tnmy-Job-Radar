@@ -392,45 +392,51 @@ export async function rescoreStoredJobs() {
     where: { isActive: true },
     include: { company: true },
   });
-  for (const job of jobs) {
-    const scored = scoreJob(
-      {
-        title: job.title,
-        description: job.description,
-        location: job.location,
-        country: job.country,
-        employmentType: job.employmentType,
-        experienceLevel: job.experienceLevel,
-        department: job.department,
-        team: job.team,
-        skills: JSON.parse(job.skills || "[]"),
-        salary: job.salary ?? undefined,
-        remoteType: (job.remoteType as "remote" | "hybrid" | "onsite" | "unknown") ?? "unknown",
-        applicationUrl: job.applicationUrl,
-        sourceUrl: job.sourceUrl,
-        sourceType: job.sourceType,
-        postedAt: job.postedAt ?? undefined,
-      },
-      prefs
+  const BATCH = 40;
+  for (let i = 0; i < jobs.length; i += BATCH) {
+    const slice = jobs.slice(i, i + BATCH);
+    await prisma.$transaction(
+      slice.map((job) => {
+        const scored = scoreJob(
+          {
+            title: job.title,
+            description: job.description,
+            location: job.location,
+            country: job.country,
+            employmentType: job.employmentType,
+            experienceLevel: job.experienceLevel,
+            department: job.department,
+            team: job.team,
+            skills: JSON.parse(job.skills || "[]"),
+            salary: job.salary ?? undefined,
+            remoteType: (job.remoteType as "remote" | "hybrid" | "onsite" | "unknown") ?? "unknown",
+            applicationUrl: job.applicationUrl,
+            sourceUrl: job.sourceUrl,
+            sourceType: job.sourceType,
+            postedAt: job.postedAt ?? undefined,
+          },
+          prefs
+        );
+        const searchText = buildSearchText({
+          title: job.title,
+          company: job.company.name,
+          city: job.city,
+          country: job.country,
+          location: job.location,
+          skills: JSON.parse(job.skills || "[]"),
+          description: job.description,
+        });
+        return prisma.job.update({
+          where: { id: job.id },
+          data: {
+            relevanceScore: scored.score,
+            isRelevant: scored.isRelevant,
+            matchReasons: JSON.stringify(scored.reasons),
+            searchText,
+          },
+        });
+      })
     );
-    const searchText = buildSearchText({
-      title: job.title,
-      company: job.company.name,
-      city: job.city,
-      country: job.country,
-      location: job.location,
-      skills: JSON.parse(job.skills || "[]"),
-      description: job.description,
-    });
-    await prisma.job.update({
-      where: { id: job.id },
-      data: {
-        relevanceScore: scored.score,
-        isRelevant: scored.isRelevant,
-        matchReasons: JSON.stringify(scored.reasons),
-        searchText,
-      },
-    });
   }
 }
 

@@ -114,28 +114,39 @@ function titleScore(title: string, prefs: PreferenceInput, reasons: string[]): n
   return 0;
 }
 
-function experienceScore(job: NormalizedJob, reasons: string[]): number {
+function experienceScore(job: NormalizedJob, prefs: PreferenceInput, reasons: string[]): number {
   const hay = `${job.title} ${job.description} ${job.experienceLevel}`.toLowerCase();
-  if (/\b(intern|internship)\b/.test(hay) && !/\bnew grad|early career|entry/.test(hay)) {
-    return 8;
-  }
-  if (
+  const level = prefs.experienceLevel || "0-2";
+  const intern = /\b(intern|internship)\b/.test(hay) && !/\bnew grad|early career|entry/.test(hay);
+  const early =
     /\b(new grad|new graduate|university grad|early career|fresh graduate|entry[- ]level|junior|graduate software|0-2|0–2|sde i\b|software engineer i\b)\b/.test(
       hay
-    )
-  ) {
-    reasons.push("0–2 years / early career");
-    return 20;
+    );
+  const mid = /\b(3-5|3–5|mid[- ]level|sde ii|sde 2|software engineer ii)\b/.test(hay);
+  const senior = /\b(5\+|5-8|6\+|7\+|8\+|10\+|senior|staff|principal)\b/.test(hay);
+
+  if (intern) {
+    reasons.push("Internship");
+    return level === "new-grad" || level === "0-2" ? 10 : 6;
   }
-  if (/\b(3-5|3–5|mid[- ]level|sde ii|sde 2|software engineer ii)\b/.test(hay)) {
+  if (early) {
+    reasons.push("0–2 years / early career");
+    if (level === "new-grad" || level === "0-2") return 22;
+    if (level === "2-3") return 14;
+    return 16;
+  }
+  if (mid) {
     reasons.push("Mid-level experience");
+    if (level === "2-3") return 18;
+    if (level === "0-2" || level === "new-grad") return 8;
     return 10;
   }
-  if (/\b(5\+|5-8|6\+|7\+|8\+|10\+|senior|staff|principal)\b/.test(hay)) {
+  if (senior) {
     reasons.push("Senior experience required");
-    return 2;
+    if (level === "0-2" || level === "new-grad") return 1;
+    return 4;
   }
-  return 12;
+  return level === "0-2" || level === "new-grad" ? 12 : 10;
 }
 
 function skillScore(job: NormalizedJob, prefs: PreferenceInput, reasons: string[]): number {
@@ -179,27 +190,41 @@ function locationScore(job: NormalizedJob, prefs: PreferenceInput, reasons: stri
   const hay = `${job.location} ${job.country} ${job.remoteType} ${city}`.toLowerCase();
   const targets = prefs.targetLocations.length ? prefs.targetLocations : PREFERRED_LOCATIONS;
 
+  let points = -8;
   if (india || includesAny(hay, targets.map((t) => t.toLowerCase()))) {
     const matched = targets.find((t) => hay.includes(t.toLowerCase()));
     reasons.push(matched || city || job.location || "India");
-    return 10;
-  }
-
-  if (job.remoteType === "remote" && hay.includes("india")) {
+    points = 10;
+  } else if (job.remoteType === "remote" && hay.includes("india")) {
     reasons.push("Remote India");
-    return 10;
-  }
-
-  if (prefs.allowInternational) {
+    points = 10;
+  } else if (prefs.allowInternational) {
     if (job.remoteType === "remote") {
       reasons.push("Remote");
-      return 6;
+      points = 6;
+    } else {
+      if (job.location || job.country) reasons.push(job.location || job.country);
+      points = 5;
     }
-    if (job.location || job.country) reasons.push(job.location || job.country);
-    return 5;
   }
 
-  return -8;
+  if (prefs.remotePreference === "remote") {
+    if (job.remoteType === "remote") {
+      reasons.push("Remote preferred");
+      points += 4;
+    } else if (job.remoteType === "onsite") {
+      points -= 5;
+    }
+  } else if (prefs.remotePreference === "hybrid") {
+    if (job.remoteType === "hybrid" || job.remoteType === "remote") {
+      reasons.push("Hybrid/remote preferred");
+      points += 3;
+    }
+  } else if (prefs.remotePreference === "onsite" && job.remoteType === "remote") {
+    points -= 3;
+  }
+
+  return points;
 }
 
 function freshnessScore(postedAt: Date | undefined, reasons: string[]): number {
@@ -236,7 +261,7 @@ export function scoreJob(job: NormalizedJob, prefs: PreferenceInput): ScoreResul
     return { score: 0, reasons: [...new Set(reasons)].slice(0, 8), isRelevant: false };
   }
 
-  const experience = experienceScore(job, reasons);
+  const experience = experienceScore(job, prefs, reasons);
   const skills = skillScore(job, prefs, reasons);
   const location = locationScore(job, prefs, reasons);
   const freshness = freshnessScore(job.postedAt, reasons);

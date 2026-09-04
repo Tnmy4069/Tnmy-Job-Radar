@@ -3,12 +3,12 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider = "mongodb"
+  url      = env("MONGODB_URI")
 }
 
 model Company {
-  id            String    @id @default(cuid())
+  id            String    @id @default(cuid()) @map("_id")
   name          String
   slug          String    @unique
   logo          String?
@@ -30,7 +30,7 @@ model Company {
 }
 
 model Job {
-  id               String    @id @default(cuid())
+  id               String    @id @default(cuid()) @map("_id")
   companyId        String
   company          Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   title            String
@@ -70,6 +70,7 @@ model Job {
   rejectedAt       DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
+  userJobs         UserJob[]
 
   @@index([companyId, isActive])
   @@index([isActive, isRelevant, relevanceScore])
@@ -80,13 +81,14 @@ model Job {
   @@index([isActive, userStatus])
   @@index([city])
   @@index([country])
-  @@index([hash])
   @@index([externalId])
   @@index([searchText])
 }
 
 model Preference {
-  id                    String   @id @default("default")
+  id                    String   @id @default("default") @map("_id")
+  userId                String?  @unique
+  user                  User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   targetTitles          String   @default("[]")
   targetLocations       String   @default("[]")
   targetSkills          String   @default("[]")
@@ -103,8 +105,55 @@ model Preference {
   updatedAt             DateTime @updatedAt
 }
 
+model User {
+  id           String    @id @default(cuid()) @map("_id")
+  email        String    @unique
+  passwordHash String
+  name         String    @default("")
+  role         String    @default("candidate")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  sessions     Session[]
+  jobs         UserJob[]
+  preference   Preference?
+
+  @@index([role])
+}
+
+model Session {
+  id        String   @id @default(cuid()) @map("_id")
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model UserJob {
+  id          String    @id @default(cuid()) @map("_id")
+  userId      String
+  jobId       String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job         Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  status      String    @default("unseen")
+  seenAt      DateTime?
+  savedAt     DateTime?
+  appliedAt   DateTime?
+  interviewAt DateTime?
+  offerAt     DateTime?
+  rejectedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([userId, jobId])
+  @@index([userId, status])
+}
+
 model ScanRun {
-  id                 String    @id @default(cuid())
+  id                 String    @id @default(cuid()) @map("_id")
   startedAt          DateTime  @default(now())
   finishedAt         DateTime?
   trigger            String
@@ -125,7 +174,7 @@ model ScanRun {
 }
 
 model ScanLog {
-  id         String   @id @default(cuid())
+  id         String   @id @default(cuid()) @map("_id")
   runId      String?
   run        ScanRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
   companyId  String?

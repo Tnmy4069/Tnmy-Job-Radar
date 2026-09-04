@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { json, notFound } from "@/lib/api";
+import { getCurrentUser, requireAdmin } from "@/lib/auth";
 import { serializeJob } from "@/app/api/jobs/route";
 
 export const dynamic = "force-dynamic";
@@ -37,6 +38,16 @@ export async function GET(
     prisma.job.count({ where: { companyId: company.id, isActive: true } }),
   ]);
 
+  const user = await getCurrentUser();
+  const statuses = new Map<string, string>();
+  if (user && jobs.length) {
+    const rows = await prisma.userJob.findMany({
+      where: { userId: user.id, jobId: { in: jobs.map((job) => job.id) } },
+      select: { jobId: true, status: true },
+    });
+    for (const row of rows) statuses.set(row.jobId, row.status);
+  }
+
   return json({
     company: {
       ...company,
@@ -46,7 +57,12 @@ export async function GET(
       all,
       active,
     },
-    jobs: jobs.map((job) => serializeJob(job, { excerpt: true })),
+    jobs: jobs.map((job) =>
+      serializeJob(job, {
+        excerpt: true,
+        userStatus: statuses.get(job.id) ?? (user ? "unseen" : job.userStatus),
+      })
+    ),
   });
 }
 
@@ -54,6 +70,8 @@ export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
+  const { response } = await requireAdmin();
+  if (response) return response;
   const { id } = await context.params;
   const body = (await request.json().catch(() => ({}))) as { enabled?: boolean };
   const company = await prisma.company.findFirst({

@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Job Radar",
+  title: "Tnmy Job Radar",
   description: "Official career-page jobs from product companies, ranked for early-career software engineers.",
 };
 

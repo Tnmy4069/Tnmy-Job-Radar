@@ -1,4 +1,5 @@
 import { allowManualScan, json } from "@/lib/api";
+import { requireAdmin } from "@/lib/auth";
 import { isScanRunning, startScan } from "@/lib/scanner/service";
 import { seedDatabase } from "@/lib/seed/run";
 
@@ -6,6 +7,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 export async function POST(request: Request) {
+  const { response } = await requireAdmin();
+  if (response) return response;
   if (isScanRunning()) {
     return json({ ok: false, message: "Scan already in progress", running: true }, 409);
   }

@@ -4,18 +4,23 @@ import { ExternalLink, MapPin } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { cn, formatJobFreshness, parseJsonArray, scoreTone } from "@/lib/utils";
 import { JobActions } from "@/components/job-actions";
+import { getCurrentUser } from "@/lib/auth";
 
-export default async function JobPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default async function JobPage({ params }: PageProps<"/jobs/[id]">) {
   const { id } = await params;
   const job = await prisma.job.findUnique({
     where: { id },
     include: { company: true },
   });
   if (!job) notFound();
+
+  const user = await getCurrentUser();
+  const tracked = user
+    ? await prisma.userJob.findUnique({
+        where: { userId_jobId: { userId: user.id, jobId: job.id } },
+      })
+    : null;
+  const userStatus = tracked?.status ?? (user ? "unseen" : job.userStatus);
 
   const reasons = parseJsonArray(job.matchReasons);
   const skills = parseJsonArray(job.skills);
@@ -82,7 +87,7 @@ export default async function JobPage({
           Apply on official page
           <ExternalLink className="h-3.5 w-3.5" />
         </a>
-        <JobActions id={job.id} status={job.userStatus} />
+        <JobActions id={job.id} status={userStatus} />
       </div>
 
       <p className="mt-4 text-xs text-muted-foreground">

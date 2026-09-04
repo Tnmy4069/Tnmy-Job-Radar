@@ -9,17 +9,26 @@ export function JobActions({ id, status }: { id: string; status: string }) {
   const [current, setCurrent] = useState(status);
 
   async function save() {
-    const res = await fetch(`/api/jobs/${id}/save`, { method: "POST" }).then((r) => r.json());
-    setCurrent(res.userStatus);
+    const res = await fetch(`/api/jobs/${id}/save`, { method: "POST" });
+    if (res.status === 401) {
+      window.location.href = "/login";
+      return;
+    }
+    const data = await res.json();
+    setCurrent(data.userStatus);
     router.refresh();
   }
 
   async function change(next: string) {
-    await fetch(`/api/jobs/${id}/status`, {
+    const res = await fetch(`/api/jobs/${id}/status`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: next }),
     });
+    if (res.status === 401) {
+      window.location.href = "/login";
+      return;
+    }
     setCurrent(next);
     router.refresh();
   }

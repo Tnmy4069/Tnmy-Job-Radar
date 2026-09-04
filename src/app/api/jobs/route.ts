@@ -1,10 +1,12 @@
 import type { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/db";
+import { contains, prisma } from "@/lib/db";
 import { json } from "@/lib/api";
+import { getCurrentUser } from "@/lib/auth";
 import { parseJsonArray } from "@/lib/utils";
 import { ROLE_FILTERS } from "@/lib/relevance/defaults";
 import { getPreferences } from "@/lib/preferences";
 import { citySortKey, countrySortKey } from "@/lib/location";
+import { jobMatchesExcluded, parseSearchQuery, rankSearchJob } from "@/lib/search";
 
 export const dynamic = "force-dynamic";
 
@@ -26,32 +28,45 @@ export async function GET(request: Request) {
   const isNew = searchParams.get("isNew");
   const active = searchParams.get("active") ?? "true";
 
-  const prefs = await getPreferences();
+  const user = await getCurrentUser();
+  const prefs = await getPreferences(user && user.role !== "superadmin" ? user.id : null);
+  const parsed = parseSearchQuery(q);
+  const forceSearch = parsed.tokens.length > 0;
 
   const where: Prisma.JobWhereInput = {};
   if (active === "true") where.isActive = true;
-  if (relevant === "true") where.isRelevant = true;
+  if (!forceSearch && relevant === "true") where.isRelevant = true;
   if (isNew === "true") where.isNew = true;
-  if (minScore > 0) where.relevanceScore = { gte: minScore };
-  if (status) where.userStatus = status;
+  if (!forceSearch && minScore > 0) where.relevanceScore = { gte: minScore };
+  if (status) {
+    if (user) {
+      const tracked = await prisma.userJob.findMany({
+        where: { userId: user.id, status },
+        select: { jobId: true },
+      });
+      where.id = { in: tracked.length ? tracked.map((row) => row.jobId) : ["__none__"] };
+    } else {
+      where.userStatus = status;
+    }
+  }
 
   const companyFilter: Prisma.CompanyWhereInput = {};
   if (company) companyFilter.slug = company;
   if (tier) companyFilter.tier = tier;
   if (Object.keys(companyFilter).length) where.company = companyFilter;
 
-  if (!prefs.allowInternational) {
+  if (!prefs.allowInternational && !forceSearch) {
     where.OR = [
-      { country: { contains: "India" } },
-      { city: { contains: "Bangalore" } },
-      { city: { contains: "Hyderabad" } },
-      { city: { contains: "Pune" } },
-      { city: { contains: "Mumbai" } },
-      { city: { contains: "Delhi" } },
-      { city: { contains: "Chennai" } },
-      { city: { contains: "Gurgaon" } },
-      { location: { contains: "India" } },
-      { AND: [{ remoteType: "remote" }, { location: { contains: "India" } }] },
+      { country: contains("India") },
+      { city: contains("Bangalore") },
+      { city: contains("Hyderabad") },
+      { city: contains("Pune") },
+      { city: contains("Mumbai") },
+      { city: contains("Delhi") },
+      { city: contains("Chennai") },
+      { city: contains("Gurgaon") },
+      { location: contains("India") },
+      { AND: [{ remoteType: "remote" }, { location: contains("India") }] },
     ];
   }
 
@@ -70,10 +85,10 @@ export async function GET(request: Request) {
       ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
       {
         OR: terms.flatMap((term) => [
-          { city: { contains: term } },
-          { location: { contains: term } },
-          { country: { contains: term } },
-          { remoteType: { contains: term } },
+          { city: contains(term) },
+          { location: contains(term) },
+          { country: contains(term) },
+          { remoteType: contains(term) },
         ]),
       },
     ];
@@ -91,17 +106,20 @@ export async function GET(request: Request) {
     ];
   }
 
-  if (q) {
-    const tokens = q.split(/\s+/).filter(Boolean);
+  if (forceSearch) {
     where.AND = [
       ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
-      ...tokens.map((token) => ({
-        searchText: { contains: token },
-      })),
+      {
+        OR: parsed.expanded.flatMap((token) => [
+          { searchText: contains(token) },
+          { title: contains(token) },
+        ]),
+      },
     ];
   }
 
-  const needsMemoryFilter = Boolean(experience || role) || sort === "country" || sort === "location";
+  const needsMemoryFilter =
+    Boolean(experience || role) || sort === "country" || sort === "location" || forceSearch;
 
   const orderBy: Prisma.JobOrderByWithRelationInput[] =
     sort === "newest"
@@ -126,8 +144,11 @@ export async function GET(request: Request) {
       }),
     ]);
 
+    const statuses = await loadUserStatuses(user?.id, jobs.map((job) => job.id));
     return json({
-      jobs: jobs.map((job) => serializeJob(job, { excerpt: true })),
+      jobs: jobs.map((job) =>
+        serializeJob(job, { excerpt: true, userStatus: statuses.get(job.id) ?? (user ? "unseen" : job.userStatus) })
+      ),
       page,
       pageSize,
       total,
@@ -144,6 +165,7 @@ export async function GET(request: Request) {
   });
 
   const filtered = jobs.filter((job) => {
+    if (jobMatchesExcluded(job.title, prefs)) return false;
     if (experience === "new-grad") {
       const blob = `${job.title} ${job.experienceLevel} ${job.description}`.toLowerCase();
       if (!/new grad|early career|graduate|entry|junior|0-2|0–2/.test(blob)) return false;
@@ -165,6 +187,12 @@ export async function GET(request: Request) {
     return true;
   });
 
+  if (forceSearch && sort === "best") {
+    filtered.sort(
+      (a, b) => rankSearchJob(b, parsed, prefs) - rankSearchJob(a, parsed, prefs)
+    );
+  }
+
   if (sort === "country" || sort === "location") {
     filtered.sort((a, b) => {
       if (sort === "country") {
@@ -181,8 +209,10 @@ export async function GET(request: Request) {
   }
 
   const start = (page - 1) * pageSize;
-  const pageItems = filtered.slice(start, start + pageSize).map((job) =>
-    serializeJob(job, { excerpt: true })
+  const pageJobs = filtered.slice(start, start + pageSize);
+  const statuses = await loadUserStatuses(user?.id, pageJobs.map((job) => job.id));
+  const pageItems = pageJobs.map((job) =>
+    serializeJob(job, { excerpt: true, userStatus: statuses.get(job.id) ?? (user ? "unseen" : job.userStatus) })
   );
 
   return json({
@@ -191,6 +221,7 @@ export async function GET(request: Request) {
     pageSize,
     total: filtered.length,
     totalPages: Math.max(1, Math.ceil(filtered.length / pageSize)),
+    forceSearch,
   });
 }
 
@@ -232,7 +263,7 @@ export function serializeJob(
       [key: string]: unknown;
     };
   },
-  options: { excerpt?: boolean } = {}
+  options: { excerpt?: boolean; userStatus?: string } = {}
 ) {
   const description = options.excerpt
     ? job.description.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 280)
@@ -263,7 +294,7 @@ export function serializeJob(
     isRelevant: job.isRelevant,
     relevanceScore: job.relevanceScore,
     matchReasons: parseJsonArray(job.matchReasons),
-    userStatus: job.userStatus,
+    userStatus: options.userStatus ?? job.userStatus,
     company: {
       id: job.company.id,
       name: job.company.name,
@@ -273,4 +304,15 @@ export function serializeJob(
       careersUrl: job.company.careersUrl,
     },
   };
+}
+
+async function loadUserStatuses(userId: string | undefined, jobIds: string[]) {
+  const map = new Map<string, string>();
+  if (!userId || !jobIds.length) return map;
+  const rows = await prisma.userJob.findMany({
+    where: { userId, jobId: { in: jobIds } },
+    select: { jobId: true, status: true },
+  });
+  for (const row of rows) map.set(row.jobId, row.status);
+  return map;
 }

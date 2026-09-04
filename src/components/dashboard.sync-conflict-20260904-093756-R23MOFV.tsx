@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import type { JobDTO } from "@/lib/types";
 import { cn, formatDuration } from "@/lib/utils";
 import { notifyNewJobs } from "@/components/notifications";
+import { useAuth } from "@/components/use-auth";
 
 type Stats = {
   relevant: number;
@@ -86,11 +87,14 @@ const FRESHNESS = [
 ];
 
 export function Dashboard() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "superadmin";
   const [stats, setStats] = useState<Stats | null>(null);
   const [jobs, setJobs] = useState<JobDTO[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
+  const [debouncedQ, setDebouncedQ] = useState("");
   const [minScore, setMinScore] = useState(70);
   const [experience, setExperience] = useState("");
   const [location, setLocation] = useState("");
@@ -106,15 +110,19 @@ export function Dashboard() {
   const [scanLatest, setScanLatest] = useState<ScanLatest>(null);
   const [scanSummary, setScanSummary] = useState<ScanSummary | null>(null);
 
+  const forceSearch = debouncedQ.trim().length > 0;
+
   const query = useMemo(() => {
     const params = new URLSearchParams({
       page: String(page),
       pageSize: "20",
       sort,
-      minScore: String(minScore),
-      relevant: minScore > 0 ? "true" : "",
     });
-    if (q) params.set("q", q);
+    if (!forceSearch) {
+      params.set("minScore", String(minScore));
+      params.set("relevant", minScore > 0 ? "true" : "");
+    }
+    if (debouncedQ) params.set("q", debouncedQ);
     if (experience) params.set("experience", experience);
     if (location) params.set("location", location);
     if (role) params.set("role", role);
@@ -122,7 +130,15 @@ export function Dashboard() {
     if (freshness) params.set("freshness", freshness);
     if (status) params.set("status", status);
     return params.toString();
-  }, [page, q, minScore, experience, location, role, tier, freshness, sort, status]);
+  }, [page, debouncedQ, forceSearch, minScore, experience, location, role, tier, freshness, sort, status]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQ(q.trim());
+      setPage(1);
+    }, 280);
+    return () => clearTimeout(timer);
+  }, [q]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -171,18 +187,27 @@ export function Dashboard() {
   }, [scanning, load]);
 
   async function updateStatus(id: string, next: string) {
-    await fetch(`/api/jobs/${id}/status`, {
+    const res = await fetch(`/api/jobs/${id}/status`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: next }),
     });
+    if (res.status === 401) {
+      window.location.href = "/login";
+      return;
+    }
     setJobs((current) => current.map((job) => (job.id === id ? { ...job, userStatus: next, isNew: false } : job)));
   }
 
   async function saveJob(id: string) {
-    const res = await fetch(`/api/jobs/${id}/save`, { method: "POST" }).then((r) => r.json());
+    const res = await fetch(`/api/jobs/${id}/save`, { method: "POST" });
+    if (res.status === 401) {
+      window.location.href = "/login";
+      return;
+    }
+    const data = await res.json();
     setJobs((current) =>
-      current.map((job) => (job.id === id ? { ...job, userStatus: res.userStatus, isNew: false } : job))
+      current.map((job) => (job.id === id ? { ...job, userStatus: data.userStatus, isNew: false } : job))
     );
   }
 
@@ -202,14 +227,16 @@ export function Dashboard() {
   return (
     <div>
       <PageIntro
-        eyebrow="Tnmy Job Radar"
+        eyebrow="Job Radar"
         title="Early-career roles from product companies"
         description="Official career pages only. Ranked for a 0–2 year software engineering profile."
         action={
-          <Button onClick={scanNow} disabled={scanning}>
-            <RefreshCw className={cn("h-4 w-4", scanning && "animate-spin")} />
-            {scanning ? "Scanning" : "Scan now"}
-          </Button>
+          isAdmin ? (
+            <Button onClick={scanNow} disabled={scanning}>
+              <RefreshCw className={cn("h-4 w-4", scanning && "animate-spin")} />
+              {scanning ? "Scanning" : "Scan now"}
+            </Button>
+          ) : undefined
         }
       />
 
@@ -224,21 +251,48 @@ export function Dashboard() {
       {scanMessage ? <p className="mb-4 text-xs text-muted-foreground">{scanMessage}</p> : null}
 
       <div className="mb-4 flex flex-col gap-3">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            value={q}
-            onChange={(event) => {
+        <div className="flex gap-2">
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={q}
+              onChange={(event) => setQ(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  setDebouncedQ(q.trim());
+                  setPage(1);
+                }
+              }}
+              placeholder="Force search: react typescript, SDE Bangalore, Next.js…"
+              className="pl-9"
+            />
+          </div>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setDebouncedQ(q.trim());
               setPage(1);
-              setQ(event.target.value);
             }}
-            placeholder="Search react typescript, software engineer bangalore, nextjs…"
-            className="pl-9"
-          />
+          >
+            Search
+          </Button>
         </div>
+        {forceSearch ? (
+          <p className="text-xs text-muted-foreground">
+            Force search is ranking every active job for “{debouncedQ}”, including listings below the score filter. Matches your settings profile first.
+          </p>
+        ) : null}
         <div className="flex flex-wrap gap-2">
           {SCORE_FILTERS.map((item) => (
-            <Chip key={item.id} active={minScore === item.value} onClick={() => { setMinScore(item.value); setPage(1); }}>
+            <Chip
+              key={item.id}
+              active={!forceSearch && minScore === item.value}
+              onClick={() => {
+                setMinScore(item.value);
+                setPage(1);
+              }}
+            >
               {item.label}
             </Chip>
           ))}
@@ -317,8 +371,12 @@ export function Dashboard() {
         </div>
       ) : jobs.length === 0 ? (
         <EmptyHint
-          title="No matching jobs yet"
-          body="Run Scan now to pull live openings from official career pages. Companies without a public ATS stay marked Unsupported instead of inventing results."
+          title={forceSearch ? `No jobs matched “${debouncedQ}”` : "No matching jobs yet"}
+          body={
+            forceSearch
+              ? "Try a shorter query, a skill, or a company name. Score filters are ignored while searching."
+              : "Run Scan now to pull live openings from official career pages. Companies without a public ATS stay marked Unsupported instead of inventing results."
+          }
         />
       ) : (
         <div className="grid gap-3">

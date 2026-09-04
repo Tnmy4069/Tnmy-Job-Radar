@@ -9,6 +9,14 @@ export function badRequest(message: string) {
   return json({ error: message }, 400);
 }
 
+export function unauthorized(message = "Sign in required") {
+  return json({ error: message }, 401);
+}
+
+export function forbidden(message = "Not allowed") {
+  return json({ error: message }, 403);
+}
+
 export function notFound(message = "Not found") {
   return json({ error: message }, 404);
 }

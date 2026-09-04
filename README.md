@@ -25,7 +25,7 @@ JobSource adapters
  ├── AtlassianAdapter
  └── GenericCareerPageAdapter
     ↓
-Normalize location → fingerprint → relevance → SQLite (Prisma)
+Normalize location → fingerprint → relevance → MongoDB (Prisma)
 ```
 
 Schedulers (pick one):
@@ -51,7 +51,7 @@ Open [http://localhost:3000](http://localhost:3000) and click **Scan now**.
 
 | Variable | Purpose |
 | --- | --- |
-| `DATABASE_URL` | Prisma DB URL. Default: `file:./dev.db` |
+| `MONGODB_URI` | Prisma MongoDB connection string |
 | `SCAN_SECRET` | Required in production for `/api/cron/scan` |
 | `NEXT_PUBLIC_APP_URL` | Public URL for cron docs |
 | `DISABLE_LOCAL_SCHEDULER` | Set `1` to disable in-process scheduler |
