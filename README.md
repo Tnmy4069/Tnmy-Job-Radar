@@ -1,36 +1,170 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Job Radar
 
-## Getting Started
+Discover software engineering jobs from **official company career pages and ATS APIs**, rank them for an early-career (0–2 years) profile, and track apply status.
 
-First, run the development server:
+The app never invents jobs. Unavailable sources are marked `unsupported` or `failed`.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Architecture
+
+```text
+UI (Next.js App Router)
+    ↓
+API routes  /api/jobs  /api/scan  /api/companies  /api/preferences
+    ↓
+Scanner (async, concurrent, 3-miss stale grace)
+    ↓
+JobSource adapters
+ ├── GreenhouseAdapter
+ ├── LeverAdapter
+ ├── AshbyAdapter
+ ├── SmartRecruitersAdapter
+ ├── WorkdayAdapter
+ ├── AmazonAdapter
+ ├── GoogleAdapter
+ ├── MicrosoftAdapter
+ ├── AtlassianAdapter
+ └── GenericCareerPageAdapter
+    ↓
+Normalize location → fingerprint → relevance → SQLite (Prisma)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Schedulers (pick one):
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- Local interval (`src/instrumentation.ts`) when `scanFrequency` is not `manual`
+- `POST /api/scan` (manual, returns immediately + client polls)
+- `GET /api/cron/scan` (Vercel Cron / external cron — requires `SCAN_SECRET` in production)
+- GitHub Actions (`.github/workflows/scan.yml`)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Setup
 
-## Learn More
+```bash
+npm install
+cp .env.example .env
+npx prisma db push
+npx tsx scripts/enable-verified.ts   # seed + enable verified sources
+npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+Open [http://localhost:3000](http://localhost:3000) and click **Scan now**.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Environment variables
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_URL` | Prisma DB URL. Default: `file:./dev.db` |
+| `SCAN_SECRET` | Required in production for `/api/cron/scan` |
+| `NEXT_PUBLIC_APP_URL` | Public URL for cron docs |
+| `DISABLE_LOCAL_SCHEDULER` | Set `1` to disable in-process scheduler |
 
-## Deploy on Vercel
+## Working sources (verified with real fetches)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+| Company | Adapter | Status |
+| --- | --- | --- |
+| Amazon | amazon.jobs JSON | WORKING |
+| Adobe | Workday CXS | WORKING |
+| Google | Official careers HTML payload | WORKING |
+| Stripe | Greenhouse | WORKING |
+| Datadog | Greenhouse | WORKING |
+| Cloudflare | Greenhouse | WORKING |
+| Figma | Greenhouse | WORKING |
+| NVIDIA | Workday CXS | WORKING |
+| GitLab | Greenhouse | WORKING |
+| Twilio | Greenhouse | WORKING |
+| Dropbox | Greenhouse | WORKING |
+| Okta | Greenhouse | WORKING |
+| Elastic | Greenhouse | WORKING |
+| Notion | Ashby | WORKING |
+| OpenAI | Ashby | WORKING |
+| Databricks | Greenhouse | WORKING |
+| Glean | Greenhouse (`gleanwork`) | WORKING |
+| Microsoft | microsoft adapter | UNSUPPORTED (official APIs 403 / unavailable) |
+| Atlassian | atlassian adapter | UNSUPPORTED (careers APIs 404) |
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+All other seeded companies remain **disabled** until an official public endpoint is confirmed (`NOT_CONFIGURED` / generic).
+
+## Running scans
+
+```bash
+# CLI (blocking)
+npm run scan
+
+# Full Phase 2 verification (two scans + report)
+npx tsx scripts/phase2-verify.ts
+
+# Enable verified companies after seed
+npx tsx scripts/enable-verified.ts
+```
+
+Manual UI scan starts asynchronously and polls `/api/scan/status`. Overlapping scans return **409**.
+
+Single company:
+
+```bash
+curl -X POST http://localhost:3000/api/scan \
+  -H "Content-Type: application/json" \
+  -d "{\"company\":\"amazon\"}"
+```
+
+## Cron
+
+Default preference: every **6 hours**.
+
+```bash
+curl -H "Authorization: Bearer $SCAN_SECRET" "$NEXT_PUBLIC_APP_URL/api/cron/scan"
+```
+
+## Relevance
+
+0–100 score:
+
+| Signal | Points |
+| --- | --- |
+| Title (excellent / good / low / reject) | 35 / 22 / 8 / 0 |
+| Experience | 20 |
+| Skills | 25 |
+| Location | 10 |
+| Freshness (`postedAt` only) | 10 |
+
+When **Allow international** is off, the jobs feed shows **India only**.
+
+## Dedup + stale jobs
+
+- Fingerprint: `externalId + company` when available, else `company + title + city + application URL`
+- `isNew` = first discovery only (not based on `postedAt`)
+- Missing from a successful fetch increments `missingScanCount`; inactive after **3** misses
+- Failed / empty fetches do not deactivate jobs
+- `userStatus` and status timestamps are never overwritten by the scanner
+
+## Adding a company
+
+1. Add / update [`src/lib/seed/companies.ts`](src/lib/seed/companies.ts)
+2. Point `sourceType` at a working adapter and set `sourceConfig`
+3. **Probe the official endpoint** — only enable after real jobs return
+4. `npx tsx scripts/enable-verified.ts` or enable from the Companies UI
+
+## Adding an adapter
+
+1. Implement `JobSourceAdapter` under `src/lib/adapters/`
+2. Normalize with `completeJob()`
+3. Register in `src/lib/adapters/registry.ts`
+
+Prefer official JSON APIs. Do not bypass CAPTCHA / anti-bot / auth.
+
+## Known limitations
+
+- Microsoft and Atlassian public career APIs are currently blocked or gone; they stay unsupported
+- Workday list endpoints often omit full descriptions
+- Google parsing depends on careers page payload shape
+- Many Indian product companies have no public ATS JSON yet
+- Ashby boards (e.g. OpenAI) can be large; the scanner caps engineering titles per company
+- No LinkedIn / Indeed / Glassdoor / aggregators
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| Empty feed | Scan now; confirm Settings allow India / international |
+| Company unsupported | Official endpoint unavailable — leave disabled |
+| Prisma EPERM on Windows | Stop `next dev`, run `npx prisma generate`, restart |
+| Scan already in progress | Wait for poll to finish or check `/api/scan/status` |
+| Duplicates after location change | Run scan twice; legacy rows without `searchText` can be cleaned with `npx tsx scripts/cleanup-legacy.ts` |

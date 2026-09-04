@@ -1,0 +1,276 @@
+import type { Prisma } from "@prisma/client";
+import { prisma } from "@/lib/db";
+import { json } from "@/lib/api";
+import { parseJsonArray } from "@/lib/utils";
+import { ROLE_FILTERS } from "@/lib/relevance/defaults";
+import { getPreferences } from "@/lib/preferences";
+import { citySortKey, countrySortKey } from "@/lib/location";
+
+export const dynamic = "force-dynamic";
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const page = Math.max(1, Number(searchParams.get("page") ?? 1));
+  const pageSize = Math.min(50, Math.max(1, Number(searchParams.get("pageSize") ?? 20)));
+  const q = (searchParams.get("q") ?? "").trim().toLowerCase();
+  const minScore = Number(searchParams.get("minScore") ?? 0);
+  const experience = searchParams.get("experience") ?? "";
+  const location = searchParams.get("location") ?? "";
+  const role = searchParams.get("role") ?? "";
+  const tier = searchParams.get("tier") ?? "";
+  const freshness = searchParams.get("freshness") ?? "";
+  const status = searchParams.get("status") ?? "";
+  const company = searchParams.get("company") ?? "";
+  const sort = searchParams.get("sort") ?? "best";
+  const relevant = searchParams.get("relevant");
+  const isNew = searchParams.get("isNew");
+  const active = searchParams.get("active") ?? "true";
+
+  const prefs = await getPreferences();
+
+  const where: Prisma.JobWhereInput = {};
+  if (active === "true") where.isActive = true;
+  if (relevant === "true") where.isRelevant = true;
+  if (isNew === "true") where.isNew = true;
+  if (minScore > 0) where.relevanceScore = { gte: minScore };
+  if (status) where.userStatus = status;
+
+  const companyFilter: Prisma.CompanyWhereInput = {};
+  if (company) companyFilter.slug = company;
+  if (tier) companyFilter.tier = tier;
+  if (Object.keys(companyFilter).length) where.company = companyFilter;
+
+  if (!prefs.allowInternational) {
+    where.OR = [
+      { country: { contains: "India" } },
+      { city: { contains: "Bangalore" } },
+      { city: { contains: "Hyderabad" } },
+      { city: { contains: "Pune" } },
+      { city: { contains: "Mumbai" } },
+      { city: { contains: "Delhi" } },
+      { city: { contains: "Chennai" } },
+      { city: { contains: "Gurgaon" } },
+      { location: { contains: "India" } },
+      { AND: [{ remoteType: "remote" }, { location: { contains: "India" } }] },
+    ];
+  }
+
+  const locationAliases: Record<string, string[]> = {
+    bangalore: ["bangalore", "bengaluru"],
+    hyderabad: ["hyderabad"],
+    pune: ["pune"],
+    mumbai: ["mumbai"],
+    ncr: ["delhi", "ncr", "gurgaon", "gurugram", "noida"],
+    chennai: ["chennai"],
+    remote: ["remote"],
+  };
+  if (location) {
+    const terms = locationAliases[location.toLowerCase()] ?? [location];
+    where.AND = [
+      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+      {
+        OR: terms.flatMap((term) => [
+          { city: { contains: term } },
+          { location: { contains: term } },
+          { country: { contains: term } },
+          { remoteType: { contains: term } },
+        ]),
+      },
+    ];
+  }
+
+  if (freshness) {
+    const days =
+      freshness === "today" ? 1 : freshness === "3d" ? 3 : freshness === "7d" ? 7 : 30;
+    const since = new Date(Date.now() - days * 86_400_000);
+    where.AND = [
+      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+      {
+        OR: [{ postedAt: { gte: since } }, { postedAt: null, discoveredAt: { gte: since } }],
+      },
+    ];
+  }
+
+  if (q) {
+    const tokens = q.split(/\s+/).filter(Boolean);
+    where.AND = [
+      ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
+      ...tokens.map((token) => ({
+        searchText: { contains: token },
+      })),
+    ];
+  }
+
+  const needsMemoryFilter = Boolean(experience || role) || sort === "country" || sort === "location";
+
+  const orderBy: Prisma.JobOrderByWithRelationInput[] =
+    sort === "newest"
+      ? [{ postedAt: "desc" }, { discoveredAt: "desc" }]
+      : sort === "company"
+        ? [{ company: { name: "asc" } }]
+        : sort === "location"
+          ? [{ city: "asc" }, { relevanceScore: "desc" }]
+          : sort === "country"
+            ? [{ country: "asc" }, { city: "asc" }, { relevanceScore: "desc" }]
+            : [{ relevanceScore: "desc" }, { postedAt: "desc" }, { discoveredAt: "desc" }];
+
+  if (!needsMemoryFilter) {
+    const [total, jobs] = await Promise.all([
+      prisma.job.count({ where }),
+      prisma.job.findMany({
+        where,
+        include: { company: true },
+        orderBy,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
+
+    return json({
+      jobs: jobs.map((job) => serializeJob(job, { excerpt: true })),
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    });
+  }
+
+  // Experience / role filters still need a bounded in-memory pass
+  const jobs = await prisma.job.findMany({
+    where,
+    include: { company: true },
+    orderBy,
+    take: 800,
+  });
+
+  const filtered = jobs.filter((job) => {
+    if (experience === "new-grad") {
+      const blob = `${job.title} ${job.experienceLevel} ${job.description}`.toLowerCase();
+      if (!/new grad|early career|graduate|entry|junior|0-2|0–2/.test(blob)) return false;
+    }
+    if (experience === "0-2") {
+      if (job.experienceLevel === "senior" || job.experienceLevel === "mid") return false;
+    }
+    if (experience === "2-3") {
+      if (!/2-3|2–3|mid|sde ii|engineer ii/.test(`${job.title} ${job.description}`.toLowerCase())) {
+        return false;
+      }
+    }
+    if (role) {
+      const filter = ROLE_FILTERS.find((item) => item.id === role);
+      if (filter && !filter.pattern.test(`${job.title} ${job.department} ${job.description}`)) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  if (sort === "country" || sort === "location") {
+    filtered.sort((a, b) => {
+      if (sort === "country") {
+        const countryCmp = countrySortKey(a.country).localeCompare(countrySortKey(b.country));
+        if (countryCmp !== 0) return countryCmp;
+        const cityCmp = citySortKey(a.city).localeCompare(citySortKey(b.city));
+        if (cityCmp !== 0) return cityCmp;
+        return b.relevanceScore - a.relevanceScore;
+      }
+      const cityCmp = citySortKey(a.city).localeCompare(citySortKey(b.city));
+      if (cityCmp !== 0) return cityCmp;
+      return b.relevanceScore - a.relevanceScore;
+    });
+  }
+
+  const start = (page - 1) * pageSize;
+  const pageItems = filtered.slice(start, start + pageSize).map((job) =>
+    serializeJob(job, { excerpt: true })
+  );
+
+  return json({
+    jobs: pageItems,
+    page,
+    pageSize,
+    total: filtered.length,
+    totalPages: Math.max(1, Math.ceil(filtered.length / pageSize)),
+  });
+}
+
+export function serializeJob(
+  job: {
+    id: string;
+    title: string;
+    description: string;
+    location: string;
+    rawLocation?: string;
+    city?: string;
+    country: string;
+    employmentType: string;
+    experienceLevel: string;
+    department: string;
+    team: string;
+    skills: string;
+    salary: string | null;
+    remoteType: string;
+    applicationUrl: string;
+    sourceUrl: string;
+    sourceType: string;
+    postedAt: Date | null;
+    discoveredAt: Date;
+    lastSeenAt: Date;
+    isNew: boolean;
+    isActive: boolean;
+    isRelevant: boolean;
+    relevanceScore: number;
+    matchReasons: string;
+    userStatus: string;
+    company: {
+      id: string;
+      name: string;
+      slug: string;
+      logo: string | null;
+      tier: string;
+      careersUrl: string;
+      [key: string]: unknown;
+    };
+  },
+  options: { excerpt?: boolean } = {}
+) {
+  const description = options.excerpt
+    ? job.description.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 280)
+    : job.description;
+  return {
+    id: job.id,
+    title: job.title,
+    description,
+    location: job.location,
+    rawLocation: job.rawLocation || job.location,
+    city: job.city || "",
+    country: job.country,
+    employmentType: job.employmentType,
+    experienceLevel: job.experienceLevel,
+    department: job.department,
+    team: job.team,
+    skills: parseJsonArray(job.skills),
+    salary: job.salary,
+    remoteType: job.remoteType,
+    applicationUrl: job.applicationUrl,
+    sourceUrl: job.sourceUrl,
+    sourceType: job.sourceType,
+    postedAt: job.postedAt,
+    discoveredAt: job.discoveredAt,
+    lastSeenAt: job.lastSeenAt,
+    isNew: job.isNew,
+    isActive: job.isActive,
+    isRelevant: job.isRelevant,
+    relevanceScore: job.relevanceScore,
+    matchReasons: parseJsonArray(job.matchReasons),
+    userStatus: job.userStatus,
+    company: {
+      id: job.company.id,
+      name: job.company.name,
+      slug: job.company.slug,
+      logo: job.company.logo,
+      tier: job.company.tier,
+      careersUrl: job.company.careersUrl,
+    },
+  };
+}

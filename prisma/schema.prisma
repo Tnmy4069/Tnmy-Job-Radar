@@ -1,0 +1,147 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Company {
+  id            String    @id @default(cuid())
+  name          String
+  slug          String    @unique
+  logo          String?
+  careersUrl    String
+  sourceType    String
+  sourceConfig  String    @default("{}")
+  tier          String
+  enabled       Boolean   @default(true)
+  lastCheckedAt DateTime?
+  checkStatus   String    @default("idle")
+  lastError     String?
+  jobs          Job[]
+  scanLogs      ScanLog[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([enabled, tier])
+  @@index([checkStatus])
+}
+
+model Job {
+  id               String    @id @default(cuid())
+  companyId        String
+  company          Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  title            String
+  description      String    @default("")
+  location         String    @default("")
+  rawLocation      String    @default("")
+  city             String    @default("")
+  country          String    @default("")
+  employmentType   String    @default("")
+  experienceLevel  String    @default("")
+  department       String    @default("")
+  team             String    @default("")
+  skills           String    @default("[]")
+  salary           String?
+  remoteType       String    @default("unknown")
+  applicationUrl   String
+  sourceUrl        String
+  sourceType       String
+  externalId       String?
+  searchText       String    @default("")
+  postedAt         DateTime?
+  discoveredAt     DateTime  @default(now())
+  lastSeenAt       DateTime  @default(now())
+  isNew            Boolean   @default(true)
+  isActive         Boolean   @default(true)
+  isRelevant       Boolean   @default(false)
+  relevanceScore   Int       @default(0)
+  matchReasons     String    @default("[]")
+  hash             String    @unique
+  missingScanCount Int       @default(0)
+  userStatus       String    @default("unseen")
+  seenAt           DateTime?
+  savedAt          DateTime?
+  appliedAt        DateTime?
+  interviewAt      DateTime?
+  offerAt          DateTime?
+  rejectedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([companyId, isActive])
+  @@index([isActive, isRelevant, relevanceScore])
+  @@index([postedAt])
+  @@index([userStatus])
+  @@index([discoveredAt])
+  @@index([isNew, isActive])
+  @@index([isActive, userStatus])
+  @@index([city])
+  @@index([country])
+  @@index([hash])
+  @@index([externalId])
+  @@index([searchText])
+}
+
+model Preference {
+  id                    String   @id @default("default")
+  targetTitles          String   @default("[]")
+  targetLocations       String   @default("[]")
+  targetSkills          String   @default("[]")
+  additionalSkills      String   @default("[]")
+  experienceLevel       String   @default("0-2")
+  remotePreference      String   @default("any")
+  excludedKeywords      String   @default("[]")
+  minimumRelevanceScore Int      @default(70)
+  scanFrequency         String   @default("6h")
+  includeSeniorRoles    Boolean  @default(false)
+  allowInternational    Boolean  @default(false)
+  notifyMinScore        Int      @default(80)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+model ScanRun {
+  id                 String    @id @default(cuid())
+  startedAt          DateTime  @default(now())
+  finishedAt         DateTime?
+  trigger            String
+  status             String
+  companies          Int       @default(0)
+  jobsFound          Int       @default(0)
+  jobsNew            Int       @default(0)
+  jobsUpdated        Int       @default(0)
+  jobsSkipped        Int       @default(0)
+  jobsInactive       Int       @default(0)
+  jobsRelevant       Int       @default(0)
+  okCount            Int       @default(0)
+  failedCount        Int       @default(0)
+  unsupportedCount   Int       @default(0)
+  errors             Int       @default(0)
+  durationMs         Int?
+  logs               ScanLog[]
+}
+
+model ScanLog {
+  id         String   @id @default(cuid())
+  runId      String?
+  run        ScanRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+  companyId  String?
+  company    Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  level      String
+  message    String
+  details    String?
+  status     String?
+  durationMs Int?
+  fetched    Int      @default(0)
+  normalized Int      @default(0)
+  relevant   Int      @default(0)
+  newJobs    Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@index([runId])
+  @@index([companyId])
+  @@index([createdAt])
+}

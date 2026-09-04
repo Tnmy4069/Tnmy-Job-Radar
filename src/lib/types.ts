@@ -1,0 +1,53 @@
+export type JobDTO = {
+  id: string;
+  title: string;
+  description: string;
+  location: string;
+  rawLocation?: string;
+  city: string;
+  country: string;
+  employmentType: string;
+  experienceLevel: string;
+  department: string;
+  team: string;
+  skills: string[];
+  salary: string | null;
+  remoteType: string;
+  applicationUrl: string;
+  sourceUrl: string;
+  sourceType: string;
+  postedAt: string | null;
+  discoveredAt: string;
+  lastSeenAt: string;
+  isNew: boolean;
+  isActive: boolean;
+  isRelevant: boolean;
+  relevanceScore: number;
+  matchReasons: string[];
+  userStatus: string;
+  company: {
+    id: string;
+    name: string;
+    slug: string;
+    logo: string | null;
+    tier: string;
+    careersUrl: string;
+  };
+};
+
+export type CompanyDTO = {
+  id: string;
+  name: string;
+  slug: string;
+  logo: string | null;
+  careersUrl: string;
+  sourceType: string;
+  tier: string;
+  enabled: boolean;
+  lastCheckedAt: string | null;
+  checkStatus: string;
+  lastError: string | null;
+  jobsFound: number;
+  relevant: number;
+  isNew: number;
+};

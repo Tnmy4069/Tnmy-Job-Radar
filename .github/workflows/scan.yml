@@ -1,0 +1,20 @@
+name: Job Radar scan
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    if: ${{ vars.JOB_RADAR_URL != '' }}
+    steps:
+      - name: Trigger official-source scan
+        env:
+          JOB_RADAR_URL: ${{ vars.JOB_RADAR_URL }}
+          SCAN_SECRET: ${{ secrets.SCAN_SECRET }}
+        run: |
+          curl -fsS -X GET \
+            -H "Authorization: Bearer $SCAN_SECRET" \
+            "$JOB_RADAR_URL/api/cron/scan"
