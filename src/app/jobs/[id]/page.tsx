@@ -33,7 +33,7 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
       : job.location || "Location not specified";
 
   return (
-    <div className="flex flex-col lg:flex-row gap-8 pb-12 animate-in fade-in duration-500 pt-6 px-4 lg:px-6">
+    <div className="flex flex-col lg:flex-row gap-6 lg:gap-8 pb-12 animate-in fade-in duration-500">
       <article className="flex-1 min-w-0 max-w-4xl">
         <nav className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-6">
           <Link href="/jobs" className="hover:text-foreground transition-colors">Jobs</Link>
@@ -46,17 +46,17 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
         <header className="mb-8">
           <div className="flex items-start justify-between gap-6">
             <div>
-              <div className="flex items-center gap-3 mb-3">
-                <div className="h-12 w-12 shrink-0 flex items-center justify-center rounded-lg border border-border bg-muted/50 overflow-hidden">
+              <div className="flex items-center gap-3 mb-3 min-w-0">
+                <div className="h-10 w-10 sm:h-12 sm:w-12 shrink-0 flex items-center justify-center rounded-lg border border-border bg-muted/50 overflow-hidden">
                   {job.company.logo ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={job.company.logo} alt={job.company.name} className="h-full w-full object-cover" />
                   ) : (
-                    <Building2 className="h-6 w-6 text-muted-foreground" />
+                    <Building2 className="h-5 w-5 sm:h-6 sm:w-6 text-muted-foreground" />
                   )}
                 </div>
-                <div>
-                  <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground leading-tight">
+                <div className="min-w-0">
+                  <h1 className="text-xl sm:text-3xl font-bold tracking-tight text-foreground leading-tight break-words">
                     {job.title}
                   </h1>
                   <Link href={`/companies/${job.company.slug}`} className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors mt-1 inline-block">
@@ -152,9 +152,9 @@ export default async function JobPage({ params }: { params: Promise<{ id: string
         </p>
       </article>
 
-      {/* Right Action Panel (Sticky) */}
-      <aside className="w-full lg:w-72 shrink-0">
-        <div className="sticky top-20 rounded-xl border border-border bg-card p-5 flex flex-col gap-4 shadow-sm">
+      {/* Action panel — first on phone, sticky rail on laptop */}
+      <aside className="w-full lg:w-72 shrink-0 order-first lg:order-none">
+        <div className="lg:sticky lg:top-4 rounded-xl border border-border bg-card p-4 sm:p-5 flex flex-col gap-4 shadow-sm">
           <h3 className="text-sm font-semibold tracking-tight">Actions</h3>
           <a
             href={job.applicationUrl}

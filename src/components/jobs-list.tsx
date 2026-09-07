@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, RefreshCw, Search } from "lucide-react";
-import { EmptyHint, PageIntro } from "@/components/app-shell";
+import { ChevronDown, Filter, Search } from "lucide-react";
+import { EmptyHint } from "@/components/app-shell";
 import { JobCard } from "@/components/job-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -125,6 +125,7 @@ export function JobsList() {
   const [loadPercent, setLoadPercent] = useState(0);
   const [loadLabel, setLoadLabel] = useState("Starting…");
   const [loadLogs, setLoadLogs] = useState<LoadLog[]>([]);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const logId = useRef(0);
 
   const pushLog = useCallback((text: string, ok = false) => {
@@ -311,94 +312,203 @@ export function JobsList() {
     setScanMessage("Scanning official career pages…");
   }
 
+  const activeFilterCount = [
+    minScore !== 70,
+    experience,
+    location,
+    role,
+    tier,
+    freshness,
+    status,
+    qDebounced,
+  ].filter(Boolean).length;
+
   return (
-    <div className="flex flex-col lg:flex-row gap-8 pb-12 animate-in fade-in duration-500 pt-6 px-4 sm:px-6 lg:px-8">
-      <aside className="w-full lg:w-72 shrink-0 flex flex-col gap-5 rounded-xl border border-border/80 bg-card/40 p-4 sm:p-5 lg:sticky lg:top-4 lg:h-fit shadow-xs">
-        <div>
-          <h2 className="text-sm font-semibold tracking-tight mb-3">Search & Filters</h2>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              value={q}
-              onChange={(event) => {
-                setPage(1);
-                setQ(event.target.value);
-              }}
-              placeholder="Search roles, skills..."
-              className="pl-9 bg-muted/50 border-transparent focus:bg-background focus:border-border"
-            />
+    <div className="flex flex-col lg:flex-row gap-5 lg:gap-8 pb-12 animate-in fade-in duration-500">
+      <aside className="w-full lg:w-72 shrink-0 flex flex-col gap-0 rounded-2xl border border-border/50 bg-card/40 backdrop-blur-md lg:sticky lg:top-4 lg:h-fit shadow-sm overflow-hidden">
+        <button
+          type="button"
+          className="flex w-full items-center justify-between gap-3 p-4 text-left lg:pointer-events-none lg:cursor-default"
+          onClick={() => setFiltersOpen((open) => !open)}
+          aria-expanded={filtersOpen}
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <Filter className="h-4 w-4 shrink-0 text-muted-foreground lg:hidden" />
+            <h2 className="text-sm font-semibold tracking-tight truncate">Search & Filters</h2>
+            {activeFilterCount > 0 ? (
+              <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold text-primary-foreground lg:hidden">
+                {activeFilterCount}
+              </span>
+            ) : null}
           </div>
-        </div>
-        
-        <div className="flex flex-col gap-4">
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">AI Score</label>
-            <div className="flex flex-wrap gap-1.5">
-              {SCORE_FILTERS.map((item) => (
-                <Chip key={item.id} active={minScore === item.value} onClick={() => { setMinScore(item.value); setPage(1); }}>
-                  {item.label}
-                </Chip>
-              ))}
+          <ChevronDown
+            className={cn(
+              "h-4 w-4 shrink-0 text-muted-foreground transition-transform lg:hidden",
+              filtersOpen && "rotate-180"
+            )}
+          />
+        </button>
+
+        <div className={cn("flex flex-col gap-5 border-t border-border/50 p-4 sm:p-5", !filtersOpen && "hidden lg:flex")}>
+          <div>
+            <div className="relative group">
+              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground transition-colors group-focus-within:text-primary" />
+              <Input
+                value={q}
+                onChange={(event) => {
+                  setPage(1);
+                  setQ(event.target.value);
+                }}
+                placeholder="Search roles, skills..."
+                className="pl-10 h-10 rounded-xl bg-muted/40 border-transparent focus:bg-background focus:border-border focus:ring-2 focus:ring-primary/20 transition-all shadow-sm"
+              />
             </div>
           </div>
-          
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Experience</label>
-            <select className="w-full h-8 rounded-md border border-border bg-card px-2 text-xs focus:ring-1 focus:ring-accent outline-none" value={experience} onChange={(e) => { setExperience(e.target.value); setPage(1); }}>
-              {EXPERIENCE.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-            </select>
-          </div>
-          
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Location</label>
-            <select className="w-full h-8 rounded-md border border-border bg-card px-2 text-xs focus:ring-1 focus:ring-accent outline-none" value={location} onChange={(e) => { setLocation(e.target.value); setPage(1); }}>
-              {LOCATIONS.map((item) => <option key={item} value={item}>{item || "Any Location"}</option>)}
-            </select>
-          </div>
-          
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Role</label>
-            <select className="w-full h-8 rounded-md border border-border bg-card px-2 text-xs focus:ring-1 focus:ring-accent outline-none" value={role} onChange={(e) => { setRole(e.target.value); setPage(1); }}>
-              {ROLES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-            </select>
-          </div>
-          
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Company Tier</label>
-            <select className="w-full h-8 rounded-md border border-border bg-card px-2 text-xs focus:ring-1 focus:ring-accent outline-none" value={tier} onChange={(e) => { setTier(e.target.value); setPage(1); }}>
-              {TIERS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-            </select>
-          </div>
-          
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Freshness</label>
-            <select className="w-full h-8 rounded-md border border-border bg-card px-2 text-xs focus:ring-1 focus:ring-accent outline-none" value={freshness} onChange={(e) => { setFreshness(e.target.value); setPage(1); }}>
-              {FRESHNESS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-            </select>
-          </div>
-          
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Status</label>
-            <select className="w-full h-8 rounded-md border border-border bg-card px-2 text-xs focus:ring-1 focus:ring-accent outline-none" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}>
-              <option value="">All status</option>
-              <option value="saved">Saved</option>
-              <option value="applied">Applied</option>
-              <option value="interview">Interview</option>
-              <option value="offer">Offer</option>
-              <option value="rejected">Rejected</option>
-            </select>
+
+          <div className="flex flex-col gap-4">
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">AI Score</label>
+              <div className="flex flex-wrap gap-1.5">
+                {SCORE_FILTERS.map((item) => (
+                  <Chip
+                    key={item.id}
+                    active={minScore === item.value}
+                    onClick={() => {
+                      setMinScore(item.value);
+                      setPage(1);
+                    }}
+                  >
+                    {item.label}
+                  </Chip>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Experience</label>
+              <select
+                className="w-full h-9 rounded-md border border-border bg-card px-2 text-xs focus:ring-1 focus:ring-accent outline-none"
+                value={experience}
+                onChange={(e) => {
+                  setExperience(e.target.value);
+                  setPage(1);
+                }}
+              >
+                {EXPERIENCE.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Location</label>
+              <select
+                className="w-full h-9 rounded-md border border-border bg-card px-2 text-xs focus:ring-1 focus:ring-accent outline-none"
+                value={location}
+                onChange={(e) => {
+                  setLocation(e.target.value);
+                  setPage(1);
+                }}
+              >
+                {LOCATIONS.map((item) => (
+                  <option key={item} value={item}>
+                    {item || "Any Location"}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Role</label>
+              <select
+                className="w-full h-9 rounded-md border border-border bg-card px-2 text-xs focus:ring-1 focus:ring-accent outline-none"
+                value={role}
+                onChange={(e) => {
+                  setRole(e.target.value);
+                  setPage(1);
+                }}
+              >
+                {ROLES.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Company Tier</label>
+              <select
+                className="w-full h-9 rounded-md border border-border bg-card px-2 text-xs focus:ring-1 focus:ring-accent outline-none"
+                value={tier}
+                onChange={(e) => {
+                  setTier(e.target.value);
+                  setPage(1);
+                }}
+              >
+                {TIERS.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Freshness</label>
+              <select
+                className="w-full h-9 rounded-md border border-border bg-card px-2 text-xs focus:ring-1 focus:ring-accent outline-none"
+                value={freshness}
+                onChange={(e) => {
+                  setFreshness(e.target.value);
+                  setPage(1);
+                }}
+              >
+                {FRESHNESS.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Status</label>
+              <select
+                className="w-full h-9 rounded-md border border-border bg-card px-2 text-xs focus:ring-1 focus:ring-accent outline-none"
+                value={status}
+                onChange={(e) => {
+                  setStatus(e.target.value);
+                  setPage(1);
+                }}
+              >
+                <option value="">All status</option>
+                <option value="saved">Saved</option>
+                <option value="applied">Applied</option>
+                <option value="interview">Interview</option>
+                <option value="offer">Offer</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            </div>
           </div>
         </div>
       </aside>
 
       <main className="flex-1 min-w-0">
-        <div className="flex items-center justify-between mb-4">
-          <div className="text-sm font-medium text-muted-foreground">
-            {total} jobs found
-          </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+          <div className="text-sm font-medium text-muted-foreground">{total} jobs found</div>
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground">Sort by:</span>
-            <select className="h-8 rounded-md border-none bg-transparent px-2 text-xs font-medium focus:ring-0 outline-none cursor-pointer" value={sort} onChange={(e) => { setSort(e.target.value); setPage(1); }}>
+            <select
+              className="h-8 rounded-md border-none bg-transparent px-2 text-xs font-medium focus:ring-0 outline-none cursor-pointer"
+              value={sort}
+              onChange={(e) => {
+                setSort(e.target.value);
+                setPage(1);
+              }}
+            >
               <option value="newest">Newest</option>
               <option value="best">Best match</option>
               <option value="company">Company</option>
@@ -408,7 +518,7 @@ export function JobsList() {
           </div>
         </div>
 
-      <section className="mb-6 rounded-xl border border-border bg-card">
+      <section className="mb-6 rounded-2xl border border-border/50 bg-card/40 backdrop-blur-sm overflow-hidden shadow-sm">
         <button
           type="button"
           className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium"
@@ -445,7 +555,7 @@ export function JobsList() {
 
       {scanLatest || scanSummary || scanning ? (
         <details
-          className="mb-5 rounded-lg border border-border bg-card px-3 py-2 text-xs"
+          className="mb-5 rounded-xl border border-border bg-card/50 px-4 py-3 text-xs shadow-sm transition-all open:bg-card open:shadow-md"
           open={scanning}
           onToggle={(event) => {
             if ((event.target as HTMLDetailsElement).open && scanCompanies.length === 0) {
@@ -458,7 +568,7 @@ export function JobsList() {
             {scanLatest?.durationMs != null ? ` · ${formatDuration(scanLatest.durationMs)}` : ""}
           </summary>
           {scanSummary || scanLatest ? (
-            <p className="mt-2 text-muted-foreground">
+            <p className="mt-2 text-muted-foreground break-words leading-relaxed">
               Companies: {scanSummary?.enabledTotal ?? scanLatest?.companies ?? 0} enabled ·{" "}
               {scanLatest?.okCount ?? scanSummary?.ok ?? 0} ok ·{" "}
               {scanLatest?.failedCount ?? scanSummary?.failed ?? 0} failed ·{" "}
@@ -511,15 +621,21 @@ export function JobsList() {
       )}
 
       {total > 20 ? (
-        <div className="mt-5 flex items-center justify-between text-sm text-muted-foreground">
+        <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between text-sm text-muted-foreground">
           <span>
             {total} jobs · page {page}
           </span>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>
+            <Button variant="outline" size="sm" className="flex-1 sm:flex-none" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>
               Previous
             </Button>
-            <Button variant="outline" size="sm" disabled={page * 20 >= total} onClick={() => setPage((p) => p + 1)}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 sm:flex-none"
+              disabled={page * 20 >= total}
+              onClick={() => setPage((p) => p + 1)}
+            >
               Next
             </Button>
           </div>
@@ -546,14 +662,14 @@ function HomeLoadPanel({
   }, []);
 
   return (
-    <section className="rounded-xl border border-border bg-card p-5">
-      <div className="flex items-end justify-between gap-4">
+    <section className="rounded-xl border border-border bg-card p-4 sm:p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">Loading feed</p>
-          <p className="mt-1 text-4xl font-semibold tabular-nums tracking-tight">{Math.min(100, percent)}%</p>
+          <p className="mt-1 text-3xl sm:text-4xl font-semibold tabular-nums tracking-tight">{Math.min(100, percent)}%</p>
           <p className="mt-1 text-sm text-muted-foreground">{label}</p>
         </div>
-        <p className="max-w-[14rem] text-right text-xs text-muted-foreground">{LOAD_TIPS[tipIndex]}</p>
+        <p className="sm:max-w-[14rem] text-left sm:text-right text-xs text-muted-foreground">{LOAD_TIPS[tipIndex]}</p>
       </div>
       <div className="mt-4 h-2 overflow-hidden rounded-full bg-muted">
         <div
@@ -597,8 +713,8 @@ function Chip({
     <button
       onClick={onClick}
       className={cn(
-        "h-8 rounded-md border px-2.5 text-xs",
-        active ? "border-foreground bg-foreground text-background" : "border-border bg-card text-muted-foreground"
+        "h-8 rounded-full border px-3 text-[11px] font-medium transition-colors",
+        active ? "border-primary bg-primary text-primary-foreground shadow-sm" : "border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
       )}
     >
       {children}

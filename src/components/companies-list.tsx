@@ -84,7 +84,7 @@ export function CompaniesList() {
       {coverage ? (
         <div className="mb-5 rounded-xl border border-border bg-card px-4 py-3 text-xs text-muted-foreground">
           <p className="font-medium text-foreground">Company coverage</p>
-          <p className="mt-1">
+          <p className="mt-1 break-words leading-relaxed">
             Tracked: {coverage.tracked} · Verified: {coverage.verified} · Unverified: {coverage.unverified} ·
             Unsupported: {coverage.unsupported} · Failed: {coverage.failed} · Disabled: {coverage.disabled}
           </p>

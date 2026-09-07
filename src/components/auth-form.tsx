@@ -43,7 +43,7 @@ export function AuthForm({
   }
 
   return (
-    <div className="mx-auto max-w-md">
+    <div className="mx-auto w-full max-w-md px-4 py-8 sm:px-6 sm:py-12">
       <PageIntro
         eyebrow={admin ? "Superadmin" : "Account"}
         title={
