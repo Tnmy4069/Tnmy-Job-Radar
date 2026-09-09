@@ -1,5 +1,8 @@
 # Job Radar
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
+
 Discover software engineering jobs from **official company career pages and ATS APIs**, rank them for an early-career (0–2 years) profile, and track apply status.
 
 The app never invents jobs. Unavailable sources are marked `unsupported` or `failed`.
@@ -209,3 +212,11 @@ Prefer official JSON APIs. Do not bypass CAPTCHA / anti-bot / auth.
 | Prisma EPERM on Windows | Stop `next dev`, run `npx prisma generate`, restart |
 | Scan already in progress | Wait for poll to finish or check `/api/scan/status` |
 | Duplicates after location change | Run scan twice; legacy rows without `searchText` can be cleaned with `npx tsx scripts/cleanup-legacy.ts` |
+
+## Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details on how to get started, add new companies, or create new ATS adapters.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
